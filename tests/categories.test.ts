@@ -1,0 +1,126 @@
+import request from 'supertest';
+
+import { createApp } from '../src/app';
+import { createTestUser, createTestCategory, cleanupDatabase } from './helpers';
+
+const app = createApp();
+
+describe('Categories', () => {
+  let adminToken: string;
+
+  beforeEach(async () => {
+    await cleanupDatabase();
+    await createTestUser('admin@example.com', 'ADMIN');
+
+    const loginRes = await request(app).post('/api/v1/auth/login').send({
+      email: 'admin@example.com',
+      password: 'password123',
+    });
+
+    expect(loginRes.status).toBe(200);
+    expect(loginRes.body).toHaveProperty('accessToken');
+    adminToken = loginRes.body.accessToken;
+  });
+
+  describe('GET /api/v1/categories', () => {
+    it('should list all categories', async () => {
+      await createTestCategory('Electronics');
+      await createTestCategory('Clothing');
+
+      const res = await request(app).get('/api/v1/categories');
+
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('categories');
+      expect(res.body.categories.length).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  describe('GET /api/v1/categories/:slug', () => {
+    it('should get category by slug', async () => {
+      await createTestCategory('Electronics', 'electronics');
+
+      const res = await request(app).get('/api/v1/categories/electronics');
+
+      expect(res.status).toBe(200);
+      expect(res.body.category.slug).toBe('electronics');
+    });
+
+    it('should return 404 for non-existent category', async () => {
+      const res = await request(app).get('/api/v1/categories/non-existent');
+
+      expect(res.status).toBe(404);
+    });
+  });
+
+  describe('POST /api/v1/categories', () => {
+    it('should create category as admin', async () => {
+      const res = await request(app)
+        .post('/api/v1/categories')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ name: 'New Category' });
+
+      expect(res.status).toBe(201);
+      expect(res.body.category.name).toBe('New Category');
+    });
+
+    it('should reject duplicate category name', async () => {
+      await createTestCategory('Electronics');
+
+      const res = await request(app)
+        .post('/api/v1/categories')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ name: 'Electronics' });
+
+      expect(res.status).toBe(409);
+    });
+
+    it('should reject unauthenticated request', async () => {
+      const res = await request(app).post('/api/v1/categories').send({ name: 'New Category' });
+
+      expect(res.status).toBe(401);
+    });
+  });
+
+  describe('PATCH /api/v1/categories/:id', () => {
+    it('should update category as admin', async () => {
+      const category = await createTestCategory('Old Name');
+
+      const res = await request(app)
+        .patch(`/api/v1/categories/${category.id}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ name: 'New Name' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.category.name).toBe('New Name');
+    });
+
+    it('should return 404 for non-existent category', async () => {
+      const res = await request(app)
+        .patch('/api/v1/categories/non-existent-id')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ name: 'New Name' });
+
+      expect(res.status).toBe(404);
+    });
+  });
+
+  describe('DELETE /api/v1/categories/:id', () => {
+    it('should delete category as admin', async () => {
+      const category = await createTestCategory('To Delete');
+
+      const res = await request(app)
+        .delete(`/api/v1/categories/${category.id}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(res.status).toBe(204);
+    });
+
+    it('should return 404 for non-existent category', async () => {
+      const res = await request(app)
+        .delete('/api/v1/categories/non-existent-id')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(res.status).toBe(404);
+    });
+  });
+});

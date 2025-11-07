@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: cozzy_test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres" 
+          --health-interval 10s 
+          --health-timeout 5s 
+          --health-retries 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: 1.1.22
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Generate Prisma Client
+        run: bunx prisma generate
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Wait for PostgreSQL
+        run: |
+          echo "Waiting for PostgreSQL to be ready..."
+          until pg_isready -h localhost -p 5432 -U postgres; do
+            echo "PostgreSQL not ready yet, waiting..."
+            sleep 2
+          done
+          echo "✅ PostgreSQL is ready!"
+
+      - name: Prepare test database
+        env:
+          DATABASE_URL_TEST: postgresql://postgres:postgres@localhost:5432/cozzy_test_db
+          NODE_ENV: test
+          # Minimal env vars for migration (JWT secrets not needed for migrations)
+          JWT_ACCESS_SECRET: test_access_secret_key_min_32_chars
+          JWT_REFRESH_SECRET: test_refresh_secret_key_min_32_chars
+        run: bun run test:db:prepare
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Build
+        run: bun run build
+
+      - name: Run tests with coverage
+        env:
+          DATABASE_URL_TEST: postgresql://postgres:postgres@localhost:5432/cozzy_test_db
+          NODE_ENV: test
+          JWT_ACCESS_SECRET: test_access_secret_key_min_32_chars
+          JWT_REFRESH_SECRET: test_refresh_secret_key_min_32_chars
+          JWT_ACCESS_EXPIRES: 15m
+          JWT_REFRESH_EXPIRES: 7d
+          STRIPE_SECRET_KEY: sk_test_fake_key_for_testing
+          STRIPE_WEBHOOK_SECRET: whsec_fake_webhook_secret_for_testing
+          APP_URL: http://localhost:4000
+          CLIENT_URL: http://localhost:3000
+        run: bun run test
+        timeout-minutes: 10
