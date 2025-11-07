@@ -146,6 +146,21 @@ The API will be available at `http://localhost:4000`
 
 ## 📚 API Documentation
 
+### Interactive API Documentation (ReDoc)
+
+Once the server is running, you can access the beautiful API documentation at:
+
+**http://localhost:4000/api-docs**
+
+The ReDoc UI provides:
+- 📖 Beautiful, modern documentation interface
+- 🔍 Complete API reference with search functionality
+- 📱 Responsive design (mobile-friendly)
+- 🎨 Clean, readable layout with custom styling
+- 📝 Request/response examples and schemas
+- 🔐 Authentication documentation (Bearer token)
+- 📄 Downloadable OpenAPI spec at `/api-docs/swagger.json`
+
 ### Base URL
 
 ```
