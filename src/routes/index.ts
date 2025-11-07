@@ -9,6 +9,26 @@ import { paymentsRouter } from '../modules/payments/payments.routes';
 
 export const router = Router();
 
+/**
+ * @swagger
+ * /health:
+ *   get:
+ *     summary: Health check endpoint
+ *     tags: [Health]
+ *     responses:
+ *       200:
+ *         description: Server is healthy
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 ok:
+ *                   type: boolean
+ *                 ts:
+ *                   type: string
+ *                   format: date-time
+ */
 router.get('/health', (_req, res) => {
   res.json({ ok: true, ts: new Date().toISOString() });
 });
