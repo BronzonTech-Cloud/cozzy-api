@@ -6,6 +6,7 @@ import { categoriesRouter } from '../modules/categories/categories.routes';
 import { productsRouter } from '../modules/products/products.routes';
 import { ordersRouter } from '../modules/orders/orders.routes';
 import { paymentsRouter } from '../modules/payments/payments.routes';
+import { cartRouter } from '../modules/cart/cart.routes';
 
 export const router = Router();
 
@@ -39,3 +40,4 @@ router.use('/categories', categoriesRouter);
 router.use('/products', productsRouter);
 router.use('/orders', ordersRouter);
 router.use('/payments', paymentsRouter);
+router.use('/cart', cartRouter);

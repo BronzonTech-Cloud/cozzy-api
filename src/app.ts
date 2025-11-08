@@ -25,11 +25,7 @@ export function createApp() {
             'https://unpkg.com',
             'https://fonts.googleapis.com',
           ],
-          styleSrc: [
-            "'self'",
-            "'unsafe-inline'",
-            'https://fonts.googleapis.com',
-          ],
+          styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
           fontSrc: ["'self'", 'https://fonts.gstatic.com'],
           imgSrc: ["'self'", 'data:', 'https:'],
         },
@@ -97,18 +93,21 @@ export function createApp() {
           typography: {
             fontSize: '15px',
             lineHeight: '1.6',
-            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+            fontFamily:
+              '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
             fontWeightRegular: '400',
             fontWeightBold: '600',
             fontWeightLight: '300',
             headings: {
-              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+              fontFamily:
+                '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
               fontWeight: '700',
               lineHeight: '1.2',
             },
             code: {
               fontSize: '13px',
-              fontFamily: '"JetBrains Mono", "Fira Code", "Consolas", "Monaco", "Courier New", monospace',
+              fontFamily:
+                '"JetBrains Mono", "Fira Code", "Consolas", "Monaco", "Courier New", monospace',
               fontWeight: '400',
               color: '#e11d48',
               backgroundColor: '#fef2f2',
