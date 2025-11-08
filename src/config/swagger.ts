@@ -1,4 +1,5 @@
 import swaggerJsdoc from 'swagger-jsdoc';
+
 import { env } from './env';
 
 const options: swaggerJsdoc.Options = {
@@ -239,6 +240,73 @@ const options: swaggerJsdoc.Options = {
             },
           },
         },
+        Cart: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'string',
+              format: 'uuid',
+            },
+            userId: {
+              type: 'string',
+              format: 'uuid',
+            },
+            items: {
+              type: 'array',
+              items: {
+                $ref: '#/components/schemas/CartItem',
+              },
+            },
+            totalCents: {
+              type: 'integer',
+              description: 'Total price in cents',
+            },
+            itemsCount: {
+              type: 'integer',
+              description: 'Total number of items in cart',
+            },
+            createdAt: {
+              type: 'string',
+              format: 'date-time',
+            },
+            updatedAt: {
+              type: 'string',
+              format: 'date-time',
+            },
+          },
+        },
+        CartItem: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'string',
+              format: 'uuid',
+            },
+            cartId: {
+              type: 'string',
+              format: 'uuid',
+            },
+            productId: {
+              type: 'string',
+              format: 'uuid',
+            },
+            product: {
+              $ref: '#/components/schemas/Product',
+            },
+            quantity: {
+              type: 'integer',
+              description: 'Quantity of the product in cart',
+            },
+            createdAt: {
+              type: 'string',
+              format: 'date-time',
+            },
+            updatedAt: {
+              type: 'string',
+              format: 'date-time',
+            },
+          },
+        },
       },
       responses: {
         ValidationError: {
@@ -302,10 +370,13 @@ const options: swaggerJsdoc.Options = {
         name: 'Payments',
         description: 'Payment processing with Stripe',
       },
+      {
+        name: 'Cart',
+        description: 'Shopping cart management',
+      },
     ],
   },
   apis: ['./src/routes/**/*.ts', './src/modules/**/*.routes.ts'],
 };
 
 export const swaggerSpec = swaggerJsdoc(options);
-
