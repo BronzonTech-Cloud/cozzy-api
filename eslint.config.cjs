@@ -74,6 +74,10 @@ module.exports = [
         beforeAll: 'readonly',
         afterAll: 'readonly',
         vi: 'readonly',
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
+        setInterval: 'readonly',
+        clearInterval: 'readonly',
       },
     },
     rules: {
