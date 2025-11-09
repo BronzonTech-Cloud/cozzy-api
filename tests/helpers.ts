@@ -49,6 +49,8 @@ export async function createTestProduct(
 export async function cleanupDatabase() {
   // Delete in order respecting foreign key constraints
   // Use sequential awaits to ensure proper order
+  await prisma.review.deleteMany();
+  await prisma.wishlist.deleteMany();
   await prisma.cartItem.deleteMany();
   await prisma.cart.deleteMany();
   await prisma.orderItem.deleteMany();

@@ -307,6 +307,86 @@ const options: swaggerJsdoc.Options = {
             },
           },
         },
+        Review: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'string',
+              format: 'uuid',
+            },
+            productId: {
+              type: 'string',
+              format: 'uuid',
+            },
+            product: {
+              $ref: '#/components/schemas/Product',
+            },
+            userId: {
+              type: 'string',
+              format: 'uuid',
+            },
+            user: {
+              $ref: '#/components/schemas/User',
+            },
+            rating: {
+              type: 'integer',
+              minimum: 1,
+              maximum: 5,
+              description: 'Rating from 1 to 5 stars',
+            },
+            title: {
+              type: 'string',
+              nullable: true,
+              description: 'Review title',
+            },
+            comment: {
+              type: 'string',
+              nullable: true,
+              description: 'Review comment',
+            },
+            verified: {
+              type: 'boolean',
+              description: 'Whether the reviewer has purchased the product',
+            },
+            helpful: {
+              type: 'integer',
+              default: 0,
+              description: 'Number of helpful votes',
+            },
+            createdAt: {
+              type: 'string',
+              format: 'date-time',
+            },
+            updatedAt: {
+              type: 'string',
+              format: 'date-time',
+            },
+          },
+        },
+        Wishlist: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'string',
+              format: 'uuid',
+            },
+            userId: {
+              type: 'string',
+              format: 'uuid',
+            },
+            productId: {
+              type: 'string',
+              format: 'uuid',
+            },
+            product: {
+              $ref: '#/components/schemas/Product',
+            },
+            createdAt: {
+              type: 'string',
+              format: 'date-time',
+            },
+          },
+        },
       },
       responses: {
         ValidationError: {
@@ -373,6 +453,14 @@ const options: swaggerJsdoc.Options = {
       {
         name: 'Cart',
         description: 'Shopping cart management',
+      },
+      {
+        name: 'Reviews',
+        description: 'Product reviews and ratings',
+      },
+      {
+        name: 'Wishlist',
+        description: 'Wishlist/favorites management',
       },
     ],
   },
