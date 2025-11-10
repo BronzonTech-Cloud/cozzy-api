@@ -7,8 +7,6 @@ const app = createApp();
 
 describe('Search', () => {
   let categoryId: string;
-  let product1Id: string;
-  let product2Id: string;
 
   beforeEach(async () => {
     await cleanupDatabase();
@@ -17,19 +15,17 @@ describe('Search', () => {
     const category = await createTestCategory('Electronics');
     categoryId = category.id;
 
-    const product1 = await createTestProduct(categoryId, {
+    await createTestProduct(categoryId, {
       title: 'Laptop Computer',
       priceCents: 100000,
       stock: 5,
     });
-    product1Id = product1.id;
 
-    const product2 = await createTestProduct(categoryId, {
+    await createTestProduct(categoryId, {
       title: 'Smartphone Device',
       priceCents: 50000,
       stock: 10,
     });
-    product2Id = product2.id;
   });
 
   describe('GET /api/v1/products/search', () => {
@@ -44,14 +40,12 @@ describe('Search', () => {
     });
 
     it('should filter by category', async () => {
-      const res = await request(app)
-        .get('/api/v1/products/search')
-        .query({ categoryId });
+      const res = await request(app).get('/api/v1/products/search').query({ categoryId });
 
       expect(res.status).toBe(200);
-      expect(res.body.products.every((p: { categoryId: string }) => p.categoryId === categoryId)).toBe(
-        true,
-      );
+      expect(
+        res.body.products.every((p: { categoryId: string }) => p.categoryId === categoryId),
+      ).toBe(true);
     });
 
     it('should filter by price range', async () => {
@@ -86,9 +80,7 @@ describe('Search', () => {
     });
 
     it('should support pagination', async () => {
-      const res = await request(app)
-        .get('/api/v1/products/search')
-        .query({ page: 1, limit: 1 });
+      const res = await request(app).get('/api/v1/products/search').query({ page: 1, limit: 1 });
 
       expect(res.status).toBe(200);
       expect(res.body.products).toHaveLength(1);
@@ -143,4 +135,3 @@ describe('Search', () => {
     });
   });
 });
-

@@ -7,12 +7,10 @@ const app = createApp();
 
 describe('Address', () => {
   let userToken: string;
-  let userId: string;
 
   beforeEach(async () => {
     await cleanupDatabase();
-    const user = await createTestUser('user@example.com', 'USER');
-    userId = user.id;
+    await createTestUser('user@example.com', 'USER');
 
     const loginRes = await request(app).post('/api/v1/auth/login').send({
       email: 'user@example.com',
@@ -208,7 +206,9 @@ describe('Address', () => {
         .get('/api/v1/profile/addresses')
         .set('Authorization', `Bearer ${userToken}`);
 
-      const address2 = getRes.body.addresses.find((a: { id: string }) => a.id === res2.body.address.id);
+      const address2 = getRes.body.addresses.find(
+        (a: { id: string }) => a.id === res2.body.address.id,
+      );
       expect(address2.isDefault).toBe(false);
     });
 
@@ -222,7 +222,7 @@ describe('Address', () => {
     });
 
     it('should return 404 for address belonging to another user', async () => {
-      const otherUser = await createTestUser('other@example.com', 'USER');
+      await createTestUser('other@example.com', 'USER');
       const loginRes = await request(app).post('/api/v1/auth/login').send({
         email: 'other@example.com',
         password: 'password123',
@@ -283,7 +283,7 @@ describe('Address', () => {
     });
 
     it('should return 404 for address belonging to another user', async () => {
-      const otherUser = await createTestUser('other@example.com', 'USER');
+      await createTestUser('other@example.com', 'USER');
       const loginRes = await request(app).post('/api/v1/auth/login').send({
         email: 'other@example.com',
         password: 'password123',
@@ -298,4 +298,3 @@ describe('Address', () => {
     });
   });
 });
-

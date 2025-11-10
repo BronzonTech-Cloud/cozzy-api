@@ -9,4 +9,3 @@ export const createVariantSchema = z.object({
 });
 
 export const updateVariantSchema = createVariantSchema.partial();
-

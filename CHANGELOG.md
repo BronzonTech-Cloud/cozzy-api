@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.0] - 2025-11-07
 
 ### Added
+
 - Initial release of Cozzy E-commerce REST API
 - JWT authentication with access and refresh tokens
 - Role-based access control (Admin and User roles)
@@ -27,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive API documentation
 
 ### Security
+
 - Password hashing with bcrypt
 - JWT token-based authentication
 - Rate limiting to prevent brute force attacks
@@ -36,4 +38,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [Unreleased]: https://github.com/BronzonTech-Cloud/cozzy-api/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/BronzonTech-Cloud/cozzy-api/releases/tag/v1.0.0
-

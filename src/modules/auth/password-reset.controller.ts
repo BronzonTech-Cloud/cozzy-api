@@ -88,4 +88,3 @@ export async function resetPassword(req: Request, res: Response) {
 
   return res.json({ message: 'Password reset successfully' });
 }
-

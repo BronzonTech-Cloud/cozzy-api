@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
+import { OrderStatus } from '@prisma/client';
 
 import { prisma } from '../../config/prisma';
-import { OrderStatus } from '@prisma/client';
 
 export async function updateOrderStatus(req: Request, res: Response) {
   const { id } = req.params as { id: string };
@@ -222,4 +222,3 @@ export async function getOrderHistory(req: Request, res: Response) {
     },
   });
 }
-

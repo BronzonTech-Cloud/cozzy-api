@@ -11,12 +11,10 @@ describe('Product Recommendations', () => {
   let category1Id: string;
   let category2Id: string;
   let product1Id: string;
-  let product2Id: string;
-  let product3Id: string;
 
   beforeEach(async () => {
     await cleanupDatabase();
-    const user = await createTestUser('user@example.com', 'USER');
+    await createTestUser('user@example.com', 'USER');
 
     const loginRes = await request(app).post('/api/v1/auth/login').send({
       email: 'user@example.com',
@@ -37,19 +35,17 @@ describe('Product Recommendations', () => {
     });
     product1Id = product1.id;
 
-    const product2 = await createTestProduct(category1Id, {
+    await createTestProduct(category1Id, {
       title: 'Smartphone',
       priceCents: 50000,
       stock: 10,
     });
-    product2Id = product2.id;
 
-    const product3 = await createTestProduct(category2Id, {
+    await createTestProduct(category2Id, {
       title: 'Book',
       priceCents: 2000,
       stock: 20,
     });
-    product3Id = product3.id;
   });
 
   describe('GET /api/v1/products/recommendations', () => {
@@ -164,4 +160,3 @@ describe('Product Recommendations', () => {
     });
   });
 });
-

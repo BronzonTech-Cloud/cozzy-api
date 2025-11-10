@@ -11,7 +11,7 @@ import {
   updateProduct,
 } from './products.controller';
 import { getRecommendations, getRelatedProducts } from './recommendations.controller';
-import { getSearchSuggestions, searchProducts } from './search.controller';
+import { searchProducts } from './search.controller';
 import { createProductVariant, getProductVariants } from './variants.controller';
 import { createVariantSchema } from './variants.schema';
 

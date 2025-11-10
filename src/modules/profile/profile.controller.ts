@@ -34,7 +34,10 @@ export async function updateProfile(req: Request, res: Response) {
       return res.status(409).json({ message: 'Email already in use' });
     }
     // If email is changed, reset verification status
-    const updateData: { name?: string; email?: string; emailVerified?: boolean } = { email, emailVerified: false };
+    const updateData: { name?: string; email?: string; emailVerified?: boolean } = {
+      email,
+      emailVerified: false,
+    };
     if (name) updateData.name = name;
     const user = await prisma.user.update({
       where: { id: userId },
@@ -92,4 +95,3 @@ export async function changePassword(req: Request, res: Response) {
 
   return res.json({ message: 'Password changed successfully' });
 }
-

@@ -2,12 +2,7 @@ import { Router } from 'express';
 
 import { authGuard } from '../../middleware/auth';
 import { validate } from '../../middleware/validate';
-import {
-  createAddress,
-  deleteAddress,
-  getAddresses,
-  updateAddress,
-} from './address.controller';
+import { createAddress, deleteAddress, getAddresses, updateAddress } from './address.controller';
 import { createAddressSchema, updateAddressSchema } from './address.schema';
 import { changePassword, getProfile, updateProfile } from './profile.controller';
 import { changePasswordSchema, updateProfileSchema } from './profile.schema';
@@ -257,4 +252,3 @@ profileRouter.patch('/addresses/:id', validate({ body: updateAddressSchema }), u
  *         $ref: '#/components/responses/NotFound'
  */
 profileRouter.delete('/addresses/:id', deleteAddress);
-

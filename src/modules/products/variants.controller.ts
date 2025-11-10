@@ -102,4 +102,3 @@ export async function deleteProductVariant(req: Request, res: Response) {
 
   return res.json({ message: 'Variant deleted successfully' });
 }
-

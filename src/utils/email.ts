@@ -58,4 +58,3 @@ export async function sendEmail(options: EmailOptions): Promise<void> {
   // For now, log in production too (should be replaced with actual service)
   console.log(`[EMAIL] Sending email to ${to}: ${subject}`);
 }
-

@@ -45,7 +45,9 @@ describe('Product Variants', () => {
     });
 
     it('should return 404 for non-existent product', async () => {
-      const res = await request(app).get('/api/v1/products/00000000-0000-0000-0000-000000000000/variants');
+      const res = await request(app).get(
+        '/api/v1/products/00000000-0000-0000-0000-000000000000/variants',
+      );
 
       expect(res.status).toBe(404);
     });
@@ -186,14 +188,13 @@ describe('Product Variants', () => {
 
     it('should return 409 for duplicate SKU', async () => {
       // Create another variant with different SKU
-      const res2 = await request(app)
+      await request(app)
         .post(`/api/v1/products/${productId}/variants`)
         .set('Authorization', `Bearer ${adminToken}`)
         .send({
           name: 'Size: Medium',
           sku: 'PROD-MD-001',
         });
-      const variantId2 = res2.body.variant.id;
 
       // Try to update first variant with second variant's SKU
       const res = await request(app)
@@ -252,4 +253,3 @@ describe('Product Variants', () => {
     });
   });
 });
-

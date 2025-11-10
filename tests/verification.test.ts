@@ -31,7 +31,10 @@ describe('Email Verification', () => {
         .set('Authorization', `Bearer ${userToken}`);
 
       expect(res.status).toBe(200);
-      expect(res.body).toHaveProperty('message', 'Verification email sent. Please check your inbox.');
+      expect(res.body).toHaveProperty(
+        'message',
+        'Verification email sent. Please check your inbox.',
+      );
 
       // Check that verification token was saved
       const user = await prisma.user.findUnique({ where: { id: userId } });
@@ -148,7 +151,10 @@ describe('Email Verification', () => {
         .set('Authorization', `Bearer ${userToken}`);
 
       expect(res.status).toBe(200);
-      expect(res.body).toHaveProperty('message', 'Verification email resent. Please check your inbox.');
+      expect(res.body).toHaveProperty(
+        'message',
+        'Verification email resent. Please check your inbox.',
+      );
 
       // Check that new token was generated
       const user2 = await prisma.user.findUnique({ where: { id: userId } });
@@ -177,4 +183,3 @@ describe('Email Verification', () => {
     });
   });
 });
-

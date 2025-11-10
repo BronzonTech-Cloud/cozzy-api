@@ -7,4 +7,3 @@ export const forgotPasswordSchema = z.object({
 export const resetPasswordSchema = z.object({
   password: z.string().min(8, 'Password must be at least 8 characters').max(100),
 });
-

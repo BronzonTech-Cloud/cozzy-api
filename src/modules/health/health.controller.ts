@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+
 import { prisma } from '../../config/prisma';
 
 /**
@@ -29,4 +30,3 @@ export async function healthCheck(_req: Request, res: Response) {
     });
   }
 }
-

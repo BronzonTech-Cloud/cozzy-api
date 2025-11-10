@@ -100,4 +100,3 @@ export async function deleteAddress(req: Request, res: Response) {
 
   return res.json({ message: 'Address deleted successfully' });
 }
-

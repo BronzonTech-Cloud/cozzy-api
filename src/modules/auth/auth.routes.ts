@@ -4,10 +4,7 @@ import { authGuard } from '../../middleware/auth';
 import { validate } from '../../middleware/validate';
 import { login, me, refresh, register } from './auth.controller';
 import { loginSchema, refreshSchema, registerSchema } from './auth.schema';
-import {
-  forgotPassword,
-  resetPassword,
-} from './password-reset.controller';
+import { forgotPassword, resetPassword } from './password-reset.controller';
 import { forgotPasswordSchema, resetPasswordSchema } from './password-reset.schema';
 import {
   requestVerificationEmail,

@@ -210,4 +210,3 @@ couponsRouter.patch(
  *         $ref: '#/components/responses/NotFound'
  */
 couponsRouter.delete('/:id', authGuard, requireRole('ADMIN'), deleteCoupon);
-

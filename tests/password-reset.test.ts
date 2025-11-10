@@ -94,7 +94,10 @@ describe('Password Reset', () => {
       });
 
       const user = await prisma.user.findUnique({ where: { id: userId } });
-      resetToken = user?.resetPasswordToken!;
+      if (!user?.resetPasswordToken) {
+        throw new Error('Reset token not found');
+      }
+      resetToken = user.resetPasswordToken;
     });
 
     it('should reset password with valid token', async () => {
@@ -190,4 +193,3 @@ describe('Password Reset', () => {
     });
   });
 });
-

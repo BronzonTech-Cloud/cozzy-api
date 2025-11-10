@@ -27,4 +27,3 @@ export const changePasswordSchema = z
     message: 'New password and confirm password must match',
     path: ['confirmPassword'],
   });
-

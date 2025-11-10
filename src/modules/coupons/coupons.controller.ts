@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
+import { DiscountType } from '@prisma/client';
 
 import { prisma } from '../../config/prisma';
-import { DiscountType } from '@prisma/client';
 
 export async function listCoupons(req: Request, res: Response) {
   const coupons = await prisma.coupon.findMany({
@@ -179,4 +179,3 @@ export async function validateCoupon(req: Request, res: Response) {
     finalTotalCents: totalCents - discountCents,
   });
 }
-

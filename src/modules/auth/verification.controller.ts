@@ -121,4 +121,3 @@ export async function resendVerificationEmail(req: Request, res: Response) {
     message: 'Verification email resent. Please check your inbox.',
   });
 }
-

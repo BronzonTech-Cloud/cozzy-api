@@ -91,4 +91,3 @@ variantsRouter.patch(
  *         $ref: '#/components/responses/NotFound'
  */
 variantsRouter.delete('/:id', authGuard, requireRole('ADMIN'), deleteProductVariant);
-

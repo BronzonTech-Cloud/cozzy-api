@@ -39,4 +39,3 @@ export const searchRouter = Router();
  *         description: Query too short (minimum 2 characters)
  */
 searchRouter.get('/suggestions', getSearchSuggestions);
-

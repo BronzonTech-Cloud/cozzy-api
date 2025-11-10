@@ -24,6 +24,7 @@ Please report security vulnerabilities by emailing the maintainers directly or t
 ### 3. Include details
 
 When reporting a vulnerability, please include:
+
 - A description of the vulnerability
 - Steps to reproduce the issue
 - Potential impact
@@ -44,6 +45,7 @@ We will acknowledge your report within 48 hours and provide a more detailed resp
 ### For Users
 
 1. **Keep dependencies updated**
+
    ```bash
    npm audit
    npm audit fix
@@ -164,4 +166,3 @@ For security concerns, please contact the maintainers directly.
 ---
 
 **Thank you for helping keep Cozzy E-commerce API secure!**
-

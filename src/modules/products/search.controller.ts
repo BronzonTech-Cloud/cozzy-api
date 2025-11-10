@@ -3,34 +3,28 @@ import { Request, Response } from 'express';
 import { prisma } from '../../config/prisma';
 
 export async function searchProducts(req: Request, res: Response) {
-  const {
-    q,
-    categoryId,
-    minPrice,
-    maxPrice,
-    inStock,
-    sortBy,
-    sortOrder,
-    page,
-    limit,
-  } = req.query as {
-    q?: string;
-    categoryId?: string;
-    minPrice?: string;
-    maxPrice?: string;
-    inStock?: string;
-    sortBy?: string;
-    sortOrder?: 'asc' | 'desc';
-    page?: string;
-    limit?: string;
-  };
+  const { q, categoryId, minPrice, maxPrice, inStock, sortBy, sortOrder, page, limit } =
+    req.query as {
+      q?: string;
+      categoryId?: string;
+      minPrice?: string;
+      maxPrice?: string;
+      inStock?: string;
+      sortBy?: string;
+      sortOrder?: 'asc' | 'desc';
+      page?: string;
+      limit?: string;
+    };
 
   const where: {
     active?: boolean;
     categoryId?: string;
     priceCents?: { gte?: number; lte?: number };
     stock?: { gt?: number };
-    OR?: Array<{ title?: { contains: string; mode?: 'insensitive' }; description?: { contains: string; mode?: 'insensitive' } }>;
+    OR?: Array<{
+      title?: { contains: string; mode?: 'insensitive' };
+      description?: { contains: string; mode?: 'insensitive' };
+    }>;
   } = {
     active: true,
   };
@@ -141,4 +135,3 @@ export async function getSearchSuggestions(req: Request, res: Response) {
 
   return res.json({ suggestions });
 }
-

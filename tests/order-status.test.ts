@@ -133,7 +133,7 @@ describe('Order Status Tracking', () => {
     });
 
     it('should return 403 for other user orders', async () => {
-      const otherUser = await createTestUser('other@example.com', 'USER');
+      await createTestUser('other@example.com', 'USER');
       const otherLogin = await request(app).post('/api/v1/auth/login').send({
         email: 'other@example.com',
         password: 'password123',
@@ -203,7 +203,7 @@ describe('Order Status Tracking', () => {
     });
 
     it('should return 403 for other user orders', async () => {
-      const otherUser = await createTestUser('other@example.com', 'USER');
+      await createTestUser('other@example.com', 'USER');
       const otherLogin = await request(app).post('/api/v1/auth/login').send({
         email: 'other@example.com',
         password: 'password123',
@@ -282,4 +282,3 @@ describe('Order Status Tracking', () => {
     });
   });
 });
-

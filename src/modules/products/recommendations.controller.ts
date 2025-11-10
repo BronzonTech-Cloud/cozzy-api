@@ -55,9 +55,7 @@ export async function getRecommendations(req: Request, res: Response) {
       where: {
         active: true,
         stock: { gt: 0 },
-        ...(categoryIds.size > 0
-          ? { categoryId: { notIn: Array.from(categoryIds) } }
-          : {}),
+        ...(categoryIds.size > 0 ? { categoryId: { notIn: Array.from(categoryIds) } } : {}),
         ...(recommendedProducts.length > 0
           ? { id: { notIn: recommendedProducts.map((p) => p.id) } }
           : {}),
@@ -108,4 +106,3 @@ export async function getRelatedProducts(req: Request, res: Response) {
 
   return res.json({ products: relatedProducts });
 }
-

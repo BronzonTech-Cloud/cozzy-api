@@ -14,4 +14,3 @@ export const orderHistoryQuerySchema = z.object({
   limit: z.string().regex(/^\d+$/).transform(Number).optional(),
   offset: z.string().regex(/^\d+$/).transform(Number).optional(),
 });
-

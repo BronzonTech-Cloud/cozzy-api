@@ -1,5 +1,6 @@
-import { prisma } from '../../config/prisma';
 import { DiscountType } from '@prisma/client';
+
+import { prisma } from '../../config/prisma';
 
 export interface CouponValidationResult {
   valid: boolean;
@@ -79,4 +80,3 @@ export async function validateAndCalculateCoupon(
     },
   };
 }
-

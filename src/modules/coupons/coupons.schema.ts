@@ -20,4 +20,3 @@ export const validateCouponSchema = z.object({
   code: z.string().min(1),
   totalCents: z.number().int().min(0),
 });
-

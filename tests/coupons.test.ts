@@ -2,7 +2,6 @@ import request from 'supertest';
 
 import { createApp } from '../src/app';
 import { prisma } from '../src/config/prisma';
-import { DiscountType } from '@prisma/client';
 import { createTestUser, cleanupDatabase } from './helpers';
 
 const app = createApp();
@@ -79,16 +78,13 @@ describe('Coupons', () => {
       validUntil.setMonth(validUntil.getMonth() + 1);
 
       // Create first coupon
-      await request(app)
-        .post('/api/v1/coupons')
-        .set('Authorization', `Bearer ${adminToken}`)
-        .send({
-          code: 'SAVE10',
-          discountType: 'PERCENTAGE',
-          discountValue: 10,
-          validFrom: validFrom.toISOString(),
-          validUntil: validUntil.toISOString(),
-        });
+      await request(app).post('/api/v1/coupons').set('Authorization', `Bearer ${adminToken}`).send({
+        code: 'SAVE10',
+        discountType: 'PERCENTAGE',
+        discountValue: 10,
+        validFrom: validFrom.toISOString(),
+        validUntil: validUntil.toISOString(),
+      });
 
       // Try to create duplicate
       const res = await request(app)
@@ -134,16 +130,13 @@ describe('Coupons', () => {
       validUntil.setMonth(validUntil.getMonth() + 1);
 
       // Create a coupon
-      await request(app)
-        .post('/api/v1/coupons')
-        .set('Authorization', `Bearer ${adminToken}`)
-        .send({
-          code: 'SAVE10',
-          discountType: 'PERCENTAGE',
-          discountValue: 10,
-          validFrom: validFrom.toISOString(),
-          validUntil: validUntil.toISOString(),
-        });
+      await request(app).post('/api/v1/coupons').set('Authorization', `Bearer ${adminToken}`).send({
+        code: 'SAVE10',
+        discountType: 'PERCENTAGE',
+        discountValue: 10,
+        validFrom: validFrom.toISOString(),
+        validUntil: validUntil.toISOString(),
+      });
 
       const res = await request(app)
         .get('/api/v1/coupons')
@@ -418,4 +411,3 @@ describe('Coupons', () => {
     });
   });
 });
-
