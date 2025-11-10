@@ -51,10 +51,14 @@ export async function cleanupDatabase() {
   // Use sequential awaits to ensure proper order
   await prisma.review.deleteMany();
   await prisma.wishlist.deleteMany();
+  await prisma.address.deleteMany();
+  await prisma.productVariant.deleteMany();
   await prisma.cartItem.deleteMany();
   await prisma.cart.deleteMany();
+  await prisma.orderStatusHistory.deleteMany();
   await prisma.orderItem.deleteMany();
   await prisma.order.deleteMany();
+  await prisma.coupon.deleteMany();
   await prisma.product.deleteMany();
   await prisma.category.deleteMany();
   await prisma.user.deleteMany();

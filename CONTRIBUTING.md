@@ -235,20 +235,24 @@ Fixes #456
 
 ```markdown
 ## Description
+
 Brief description of changes
 
 ## Type of Change
+
 - [ ] Bug fix
 - [ ] New feature
 - [ ] Breaking change
 - [ ] Documentation update
 
 ## Testing
+
 - [ ] Tests added/updated
 - [ ] All tests pass
 - [ ] Manual testing completed
 
 ## Checklist
+
 - [ ] Code follows style guidelines
 - [ ] Self-review completed
 - [ ] Comments added for complex code
@@ -279,6 +283,7 @@ A clear description of what the bug is.
 
 **To Reproduce**
 Steps to reproduce the behavior:
+
 1. Go to '...'
 2. Click on '....'
 3. See error
@@ -287,6 +292,7 @@ Steps to reproduce the behavior:
 What you expected to happen.
 
 **Environment:**
+
 - OS: [e.g., Ubuntu 22.04]
 - Node version: [e.g., 18.17.0]
 - Database: [e.g., PostgreSQL 16]
@@ -323,9 +329,9 @@ Any other relevant information.
 ## ❓ Questions?
 
 If you have questions, feel free to:
+
 - Open an issue for discussion
 - Check existing issues and PRs
 - Review the documentation
 
 Thank you for contributing to Cozzy E-commerce API! 🚀
-

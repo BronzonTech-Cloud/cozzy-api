@@ -18,17 +18,17 @@ A production-ready, full-featured RESTful E-commerce API built with TypeScript, 
 
 ## 🛠️ Tech Stack
 
-| Category | Technology |
-|----------|-----------|
-| **Runtime** | Node.js |
-| **Language** | TypeScript |
-| **Framework** | Express.js |
-| **Database** | PostgreSQL |
-| **ORM** | Prisma |
-| **Authentication** | JWT + bcrypt |
-| **Payments** | Stripe API |
-| **Testing** | Vitest + Supertest |
-| **Code Quality** | ESLint + Prettier |
+| Category           | Technology         |
+| ------------------ | ------------------ |
+| **Runtime**        | Node.js            |
+| **Language**       | TypeScript         |
+| **Framework**      | Express.js         |
+| **Database**       | PostgreSQL         |
+| **ORM**            | Prisma             |
+| **Authentication** | JWT + bcrypt       |
+| **Payments**       | Stripe API         |
+| **Testing**        | Vitest + Supertest |
+| **Code Quality**   | ESLint + Prettier  |
 
 ## 📋 Table of Contents
 
@@ -128,19 +128,19 @@ The API will be available at `http://localhost:4000`
 
 ### Environment Variables
 
-| Variable | Description | Required | Default |
-|----------|-------------|----------|---------|
-| `PORT` | Server port | No | `4000` |
-| `DATABASE_URL` | PostgreSQL connection string | Yes | - |
-| `DATABASE_URL_TEST` | Test database connection string | No | Uses `DATABASE_URL` |
-| `JWT_ACCESS_SECRET` | Secret for access tokens | Yes | - |
-| `JWT_REFRESH_SECRET` | Secret for refresh tokens | Yes | - |
-| `JWT_ACCESS_EXPIRES` | Access token expiration | No | `15m` |
-| `JWT_REFRESH_EXPIRES` | Refresh token expiration | No | `7d` |
-| `STRIPE_SECRET_KEY` | Stripe secret key | Yes | - |
-| `STRIPE_WEBHOOK_SECRET` | Stripe webhook secret | Yes | - |
-| `APP_URL` | Application URL | Yes | - |
-| `CLIENT_URL` | Frontend URL for CORS | Yes | - |
+| Variable                | Description                     | Required | Default             |
+| ----------------------- | ------------------------------- | -------- | ------------------- |
+| `PORT`                  | Server port                     | No       | `4000`              |
+| `DATABASE_URL`          | PostgreSQL connection string    | Yes      | -                   |
+| `DATABASE_URL_TEST`     | Test database connection string | No       | Uses `DATABASE_URL` |
+| `JWT_ACCESS_SECRET`     | Secret for access tokens        | Yes      | -                   |
+| `JWT_REFRESH_SECRET`    | Secret for refresh tokens       | Yes      | -                   |
+| `JWT_ACCESS_EXPIRES`    | Access token expiration         | No       | `15m`               |
+| `JWT_REFRESH_EXPIRES`   | Refresh token expiration        | No       | `7d`                |
+| `STRIPE_SECRET_KEY`     | Stripe secret key               | Yes      | -                   |
+| `STRIPE_WEBHOOK_SECRET` | Stripe webhook secret           | Yes      | -                   |
+| `APP_URL`               | Application URL                 | Yes      | -                   |
+| `CLIENT_URL`            | Frontend URL for CORS           | Yes      | -                   |
 
 **Note:** `DATABASE_URL_TEST` is optional but recommended. If not set, tests will use `DATABASE_URL`. Using a separate test database prevents data conflicts.
 
@@ -153,6 +153,7 @@ Once the server is running, you can access the beautiful API documentation at:
 **http://localhost:4000/api-docs**
 
 The ReDoc UI provides:
+
 - 📖 Beautiful, modern documentation interface
 - 🔍 Complete API reference with search functionality
 - 📱 Responsive design (mobile-friendly)
@@ -282,16 +283,16 @@ GET /api/v1/products?page=1&limit=10&q=laptop&category=electronics&minPrice=1000
 
 **Query Parameters:**
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `page` | number | Page number (default: 1) |
-| `limit` | number | Items per page (default: 20) |
-| `q` | string | Search query |
-| `category` | string | Category slug |
-| `minPrice` | number | Minimum price in cents |
-| `maxPrice` | number | Maximum price in cents |
-| `active` | boolean | Filter by active status |
-| `sort` | string | Sort order: `price_asc`, `price_desc`, `newest` |
+| Parameter  | Type    | Description                                     |
+| ---------- | ------- | ----------------------------------------------- |
+| `page`     | number  | Page number (default: 1)                        |
+| `limit`    | number  | Items per page (default: 20)                    |
+| `q`        | string  | Search query                                    |
+| `category` | string  | Category slug                                   |
+| `minPrice` | number  | Minimum price in cents                          |
+| `maxPrice` | number  | Maximum price in cents                          |
+| `active`   | boolean | Filter by active status                         |
+| `sort`     | string  | Sort order: `price_asc`, `price_desc`, `newest` |
 
 **Response (200 OK):**
 
@@ -661,6 +662,7 @@ npm run test:save
 ### Test Coverage
 
 Current coverage thresholds:
+
 - **Statements:** 78.74%
 - **Branches:** 66.12%
 - **Functions:** 84.21%
@@ -670,22 +672,22 @@ All 52 tests passing ✅
 
 ## 📜 Scripts
 
-| Script | Description |
-|--------|-------------|
-| `npm run dev` | Start development server with hot reload |
-| `npm run build` | Build TypeScript to JavaScript |
-| `npm run start` | Start production server |
-| `npm run lint` | Run ESLint |
-| `npm run format` | Format code with Prettier |
-| `npm run test` | Run tests with coverage |
-| `npm run test:watch` | Run tests in watch mode |
-| `npm run test:save` | Run tests and save results to file |
-| `npm run test:db:prepare` | Prepare test database (run migrations) |
-| `npm run test:db:seed` | Seed test database |
-| `npm run prisma:migrate` | Create and run Prisma migrations |
-| `npm run prisma:deploy` | Deploy Prisma migrations |
-| `npm run prisma:studio` | Open Prisma Studio |
-| `npm run seed` | Seed production database |
+| Script                    | Description                              |
+| ------------------------- | ---------------------------------------- |
+| `npm run dev`             | Start development server with hot reload |
+| `npm run build`           | Build TypeScript to JavaScript           |
+| `npm run start`           | Start production server                  |
+| `npm run lint`            | Run ESLint                               |
+| `npm run format`          | Format code with Prettier                |
+| `npm run test`            | Run tests with coverage                  |
+| `npm run test:watch`      | Run tests in watch mode                  |
+| `npm run test:save`       | Run tests and save results to file       |
+| `npm run test:db:prepare` | Prepare test database (run migrations)   |
+| `npm run test:db:seed`    | Seed test database                       |
+| `npm run prisma:migrate`  | Create and run Prisma migrations         |
+| `npm run prisma:deploy`   | Deploy Prisma migrations                 |
+| `npm run prisma:studio`   | Open Prisma Studio                       |
+| `npm run seed`            | Seed production database                 |
 
 ## 📁 Project Structure
 

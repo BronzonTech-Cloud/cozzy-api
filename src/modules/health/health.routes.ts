@@ -1,4 +1,5 @@
 import { Router } from 'express';
+
 import { healthCheck } from './health.controller';
 
 export const healthRouter = Router();
@@ -60,4 +61,3 @@ export const healthRouter = Router();
  *                   type: string
  */
 healthRouter.get('/', healthCheck);
-
