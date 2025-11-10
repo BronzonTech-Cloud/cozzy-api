@@ -73,6 +73,10 @@ const options: swaggerJsdoc.Options = {
               type: 'string',
               enum: ['USER', 'ADMIN'],
             },
+            emailVerified: {
+              type: 'boolean',
+              description: 'Whether the user has verified their email',
+            },
             createdAt: {
               type: 'string',
               format: 'date-time',
@@ -200,6 +204,30 @@ const options: swaggerJsdoc.Options = {
               items: {
                 $ref: '#/components/schemas/OrderItem',
               },
+            },
+            trackingNumber: {
+              type: 'string',
+              nullable: true,
+              description: 'Shipping tracking number',
+            },
+            shippedAt: {
+              type: 'string',
+              format: 'date-time',
+              nullable: true,
+              description: 'Date when order was shipped',
+            },
+            deliveredAt: {
+              type: 'string',
+              format: 'date-time',
+              nullable: true,
+              description: 'Date when order was delivered',
+            },
+            statusHistory: {
+              type: 'array',
+              items: {
+                $ref: '#/components/schemas/OrderStatusHistory',
+              },
+              description: 'Order status change history',
             },
             createdAt: {
               type: 'string',
@@ -387,6 +415,328 @@ const options: swaggerJsdoc.Options = {
             },
           },
         },
+        Address: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'string',
+              format: 'uuid',
+            },
+            userId: {
+              type: 'string',
+              format: 'uuid',
+            },
+            label: {
+              type: 'string',
+              description: 'Address label (e.g., "Home", "Work")',
+            },
+            firstName: {
+              type: 'string',
+            },
+            lastName: {
+              type: 'string',
+            },
+            street: {
+              type: 'string',
+            },
+            city: {
+              type: 'string',
+            },
+            state: {
+              type: 'string',
+              nullable: true,
+            },
+            zipCode: {
+              type: 'string',
+            },
+            country: {
+              type: 'string',
+              default: 'US',
+            },
+            phone: {
+              type: 'string',
+              nullable: true,
+            },
+            isDefault: {
+              type: 'boolean',
+              default: false,
+            },
+            createdAt: {
+              type: 'string',
+              format: 'date-time',
+            },
+            updatedAt: {
+              type: 'string',
+              format: 'date-time',
+            },
+          },
+        },
+        AddressInput: {
+          type: 'object',
+          required: ['label', 'firstName', 'lastName', 'street', 'city', 'zipCode'],
+          properties: {
+            label: {
+              type: 'string',
+              minLength: 1,
+              maxLength: 50,
+            },
+            firstName: {
+              type: 'string',
+              minLength: 1,
+              maxLength: 100,
+            },
+            lastName: {
+              type: 'string',
+              minLength: 1,
+              maxLength: 100,
+            },
+            street: {
+              type: 'string',
+              minLength: 1,
+              maxLength: 200,
+            },
+            city: {
+              type: 'string',
+              minLength: 1,
+              maxLength: 100,
+            },
+            state: {
+              type: 'string',
+              maxLength: 100,
+            },
+            zipCode: {
+              type: 'string',
+              minLength: 1,
+              maxLength: 20,
+            },
+            country: {
+              type: 'string',
+              minLength: 2,
+              maxLength: 2,
+              default: 'US',
+            },
+            phone: {
+              type: 'string',
+              maxLength: 20,
+            },
+            isDefault: {
+              type: 'boolean',
+              default: false,
+            },
+          },
+        },
+        OrderStatusHistory: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'string',
+              format: 'uuid',
+            },
+            orderId: {
+              type: 'string',
+              format: 'uuid',
+            },
+            status: {
+              type: 'string',
+              enum: ['PENDING', 'PAID', 'CANCELLED', 'FULFILLED', 'REFUNDED'],
+            },
+            note: {
+              type: 'string',
+              nullable: true,
+            },
+            createdAt: {
+              type: 'string',
+              format: 'date-time',
+            },
+          },
+        },
+        ProductVariant: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'string',
+              format: 'uuid',
+            },
+            productId: {
+              type: 'string',
+              format: 'uuid',
+            },
+            name: {
+              type: 'string',
+              description: 'Variant name (e.g., "Size: Large", "Color: Red")',
+            },
+            sku: {
+              type: 'string',
+              nullable: true,
+              description: 'Stock Keeping Unit',
+            },
+            priceCents: {
+              type: 'integer',
+              nullable: true,
+              description: 'Override product price (in cents)',
+            },
+            stock: {
+              type: 'integer',
+              default: 0,
+              description: 'Stock quantity for this variant',
+            },
+            images: {
+              type: 'array',
+              items: { type: 'string', format: 'url' },
+              description: 'Variant-specific images',
+            },
+            createdAt: {
+              type: 'string',
+              format: 'date-time',
+            },
+            updatedAt: {
+              type: 'string',
+              format: 'date-time',
+            },
+          },
+        },
+        ProductVariantInput: {
+          type: 'object',
+          required: ['name'],
+          properties: {
+            name: {
+              type: 'string',
+              minLength: 1,
+              maxLength: 200,
+            },
+            sku: {
+              type: 'string',
+              maxLength: 100,
+            },
+            priceCents: {
+              type: 'integer',
+              minimum: 1,
+              description: 'Override product price (in cents)',
+            },
+            stock: {
+              type: 'integer',
+              minimum: 0,
+              default: 0,
+            },
+            images: {
+              type: 'array',
+              items: { type: 'string', format: 'url' },
+              default: [],
+            },
+          },
+        },
+        Coupon: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'string',
+              format: 'uuid',
+            },
+            code: {
+              type: 'string',
+              description: 'Unique coupon code',
+            },
+            description: {
+              type: 'string',
+              nullable: true,
+            },
+            discountType: {
+              type: 'string',
+              enum: ['PERCENTAGE', 'FIXED_AMOUNT'],
+            },
+            discountValue: {
+              type: 'integer',
+              description: 'Percentage (1-100) or amount in cents',
+            },
+            minPurchase: {
+              type: 'integer',
+              nullable: true,
+              description: 'Minimum purchase amount in cents',
+            },
+            maxDiscount: {
+              type: 'integer',
+              nullable: true,
+              description: 'Maximum discount amount in cents (for percentage discounts)',
+            },
+            usageLimit: {
+              type: 'integer',
+              nullable: true,
+              description: 'Total usage limit',
+            },
+            usageCount: {
+              type: 'integer',
+              default: 0,
+              description: 'Current usage count',
+            },
+            validFrom: {
+              type: 'string',
+              format: 'date-time',
+            },
+            validUntil: {
+              type: 'string',
+              format: 'date-time',
+            },
+            active: {
+              type: 'boolean',
+              default: true,
+            },
+            createdAt: {
+              type: 'string',
+              format: 'date-time',
+            },
+            updatedAt: {
+              type: 'string',
+              format: 'date-time',
+            },
+          },
+        },
+        CouponInput: {
+          type: 'object',
+          required: ['code', 'discountType', 'discountValue', 'validFrom', 'validUntil'],
+          properties: {
+            code: {
+              type: 'string',
+              minLength: 1,
+              maxLength: 50,
+            },
+            description: {
+              type: 'string',
+              maxLength: 500,
+            },
+            discountType: {
+              type: 'string',
+              enum: ['PERCENTAGE', 'FIXED_AMOUNT'],
+            },
+            discountValue: {
+              type: 'integer',
+              minimum: 1,
+            },
+            minPurchase: {
+              type: 'integer',
+              minimum: 1,
+            },
+            maxDiscount: {
+              type: 'integer',
+              minimum: 1,
+            },
+            usageLimit: {
+              type: 'integer',
+              minimum: 1,
+            },
+            validFrom: {
+              type: 'string',
+              format: 'date-time',
+            },
+            validUntil: {
+              type: 'string',
+              format: 'date-time',
+            },
+            active: {
+              type: 'boolean',
+              default: true,
+            },
+          },
+        },
       },
       responses: {
         ValidationError: {
@@ -461,6 +811,18 @@ const options: swaggerJsdoc.Options = {
       {
         name: 'Wishlist',
         description: 'Wishlist/favorites management',
+      },
+      {
+        name: 'Profile',
+        description: 'User profile and address management',
+      },
+      {
+        name: 'Coupons',
+        description: 'Coupon and discount code management',
+      },
+      {
+        name: 'Search',
+        description: 'Product search and suggestions',
       },
     ],
   },

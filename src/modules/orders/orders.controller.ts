@@ -1,12 +1,14 @@
 import { Request, Response } from 'express';
 
 import { prisma } from '../../config/prisma';
+import { validateAndCalculateCoupon } from '../coupons/coupon-utils';
 
 export async function createOrder(req: Request, res: Response) {
   const userId = req.user!.id;
-  const { items, currency } = req.body as {
+  const { items, currency, couponCode } = req.body as {
     items: { productId: string; quantity: number }[];
     currency?: string;
+    couponCode?: string;
   };
 
   const productIds = items.map((i) => i.productId);
@@ -22,11 +24,25 @@ export async function createOrder(req: Request, res: Response) {
       return res.status(400).json({ message: `Insufficient stock for product ${product.title}` });
   }
 
-  const totalCents = items.reduce(
+  const subtotalCents = items.reduce(
     (acc, it) => acc + idToProduct.get(it.productId)!.priceCents * it.quantity,
     0,
   );
   const itemsCount = items.reduce((acc, it) => acc + it.quantity, 0);
+
+  // Validate and apply coupon if provided
+  let discountCents = 0;
+  let appliedCouponCode: string | null = null;
+  if (couponCode) {
+    const couponResult = await validateAndCalculateCoupon(couponCode, subtotalCents);
+    if (!couponResult.valid) {
+      return res.status(400).json({ message: couponResult.error || 'Invalid coupon' });
+    }
+    discountCents = couponResult.discountCents;
+    appliedCouponCode = couponCode;
+  }
+
+  const totalCents = subtotalCents - discountCents;
 
   const result = await prisma.$transaction(async (tx) => {
     const order = await tx.order.create({
@@ -37,6 +53,17 @@ export async function createOrder(req: Request, res: Response) {
         currency: currency || 'USD',
         itemsCount,
         paymentProvider: 'STRIPE',
+        couponCode: appliedCouponCode,
+        discountCents,
+      },
+    });
+
+    // Create initial status history entry
+    await tx.orderStatusHistory.create({
+      data: {
+        orderId: order.id,
+        status: 'PENDING',
+        note: 'Order created',
       },
     });
 
@@ -54,6 +81,14 @@ export async function createOrder(req: Request, res: Response) {
       await tx.product.update({
         where: { id: product.id },
         data: { stock: { decrement: item.quantity } },
+      });
+    }
+
+    // Increment coupon usage count if coupon was applied
+    if (appliedCouponCode) {
+      await tx.coupon.update({
+        where: { code: appliedCouponCode },
+        data: { usageCount: { increment: 1 } },
       });
     }
 

@@ -9,6 +9,10 @@ import { paymentsRouter } from '../modules/payments/payments.routes';
 import { cartRouter } from '../modules/cart/cart.routes';
 import { reviewsRouter } from '../modules/reviews/reviews.routes';
 import { wishlistRouter } from '../modules/wishlist/wishlist.routes';
+import { profileRouter } from '../modules/profile/profile.routes';
+import { variantsRouter } from '../modules/products/variants.routes';
+import { couponsRouter } from '../modules/coupons/coupons.routes';
+import { searchRouter } from '../modules/search/search.routes';
 import { healthRouter } from '../modules/health/health.routes';
 
 export const router = Router();
@@ -23,3 +27,7 @@ router.use('/payments', paymentsRouter);
 router.use('/cart', cartRouter);
 router.use('/', reviewsRouter); // Handles /products/:productId/reviews and /reviews/:reviewId
 router.use('/wishlist', wishlistRouter);
+router.use('/profile', profileRouter);
+router.use('/variants', variantsRouter);
+router.use('/coupons', couponsRouter);
+router.use('/search', searchRouter);

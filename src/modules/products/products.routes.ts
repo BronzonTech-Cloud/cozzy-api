@@ -10,6 +10,10 @@ import {
   listProducts,
   updateProduct,
 } from './products.controller';
+import { getRecommendations, getRelatedProducts } from './recommendations.controller';
+import { getSearchSuggestions, searchProducts } from './search.controller';
+import { createProductVariant, getProductVariants } from './variants.controller';
+import { createVariantSchema } from './variants.schema';
 
 export const productsRouter = Router();
 
@@ -68,6 +72,156 @@ export const productsRouter = Router();
  *                       type: integer
  */
 productsRouter.get('/', listProducts);
+
+/**
+ * @swagger
+ * /api/v1/products/search:
+ *   get:
+ *     summary: Advanced product search with filters
+ *     tags: [Products]
+ *     parameters:
+ *       - in: query
+ *         name: q
+ *         schema:
+ *           type: string
+ *         description: Search query (searches in title and description)
+ *       - in: query
+ *         name: categoryId
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Filter by category ID
+ *       - in: query
+ *         name: minPrice
+ *         schema:
+ *           type: integer
+ *         description: Minimum price in cents
+ *       - in: query
+ *         name: maxPrice
+ *         schema:
+ *           type: integer
+ *         description: Maximum price in cents
+ *       - in: query
+ *         name: inStock
+ *         schema:
+ *           type: boolean
+ *         description: Filter products in stock
+ *       - in: query
+ *         name: sortBy
+ *         schema:
+ *           type: string
+ *           enum: [title, priceCents, createdAt, stock]
+ *         description: Sort field
+ *       - in: query
+ *         name: sortOrder
+ *         schema:
+ *           type: string
+ *           enum: [asc, desc]
+ *           default: desc
+ *         description: Sort order
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Page number
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *         description: Items per page
+ *     responses:
+ *       200:
+ *         description: Search results with pagination
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 products:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/Product'
+ *                 pagination:
+ *                   type: object
+ *                   properties:
+ *                     total: { type: integer }
+ *                     page: { type: integer }
+ *                     limit: { type: integer }
+ *                     totalPages: { type: integer }
+ *                     hasMore: { type: boolean }
+ */
+productsRouter.get('/search', searchProducts);
+
+/**
+ * @swagger
+ * /api/v1/products/recommendations:
+ *   get:
+ *     summary: Get personalized product recommendations
+ *     tags: [Products]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *         description: Number of recommendations
+ *     responses:
+ *       200:
+ *         description: Recommended products
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 products:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/Product'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ */
+productsRouter.get('/recommendations', authGuard, getRecommendations);
+
+/**
+ * @swagger
+ * /api/v1/products/{id}/related:
+ *   get:
+ *     summary: Get related products
+ *     tags: [Products]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Product ID
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 5
+ *         description: Number of related products
+ *     responses:
+ *       200:
+ *         description: Related products
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 products:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/Product'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ */
+productsRouter.get('/:id/related', getRelatedProducts);
 
 /**
  * @swagger
@@ -266,3 +420,85 @@ productsRouter.patch(
  *         $ref: '#/components/responses/NotFound'
  */
 productsRouter.delete('/:id', authGuard, requireRole('ADMIN'), deleteProduct);
+
+/**
+ * @swagger
+ * /api/v1/products/{id}/variants:
+ *   get:
+ *     summary: Get product variants
+ *     tags: [Products]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Product ID
+ *     responses:
+ *       200:
+ *         description: List of product variants
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 variants:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/ProductVariant'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ */
+productsRouter.get('/:id/variants', getProductVariants);
+
+/**
+ * @swagger
+ * /api/v1/products/{id}/variants:
+ *   post:
+ *     summary: Add product variant (Admin only)
+ *     tags: [Products]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Product ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/ProductVariantInput'
+ *     responses:
+ *       201:
+ *         description: Variant created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 variant:
+ *                   $ref: '#/components/schemas/ProductVariant'
+ *       400:
+ *         $ref: '#/components/responses/ValidationError'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         description: Forbidden (Admin only)
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       409:
+ *         description: SKU already exists
+ */
+productsRouter.post(
+  '/:id/variants',
+  authGuard,
+  requireRole('ADMIN'),
+  validate({ body: createVariantSchema }),
+  createProductVariant,
+);

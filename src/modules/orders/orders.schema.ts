@@ -8,4 +8,5 @@ export const orderItemSchema = z.object({
 export const createOrderSchema = z.object({
   items: z.array(orderItemSchema).min(1),
   currency: z.string().default('USD'),
+  couponCode: z.string().optional(),
 });
