@@ -22,11 +22,13 @@ export async function createTestUserAndLogin(
   }
 
   // Retry logic to ensure user is visible in database (handles CI transaction/visibility issues)
+  // Increased retries and delays for better reliability in CI
   let verifyUser = null;
-  const maxRetries = 5;
+  const maxRetries = 10;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     if (attempt > 0) {
-      await new Promise((resolve) => setTimeout(resolve, 50 * attempt)); // Exponential backoff: 50ms, 100ms, 150ms, 200ms
+      // Exponential backoff: 100ms, 200ms, 300ms, 400ms, 500ms, etc.
+      await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
     }
     
     verifyUser = await prisma.user.findUnique({
@@ -44,10 +46,13 @@ export async function createTestUserAndLogin(
   }
 
   // Retry login with exponential backoff (handles timing issues in CI)
+  // Increased retries for better reliability
   let loginRes = null;
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
+  const loginMaxRetries = 10;
+  for (let attempt = 0; attempt < loginMaxRetries; attempt++) {
     if (attempt > 0) {
-      await new Promise((resolve) => setTimeout(resolve, 50 * attempt));
+      // Exponential backoff: 100ms, 200ms, 300ms, 400ms, 500ms, etc.
+      await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
     }
     
     loginRes = await request(app).post('/api/v1/auth/login').send({
@@ -88,26 +93,39 @@ export async function createTestUser(email: string, role: 'USER' | 'ADMIN' = 'US
   const passwordHash = await bcrypt.hash('password123', 10);
   
   try {
-    const user = await prisma.user.upsert({
-      where: { email },
-      update: {
-        // Update role and password in case user already exists with different values
-        role,
-        passwordHash,
-        name: 'Test User',
+    // Use a transaction to ensure the user is committed and visible immediately
+    // Using isolation level 'Read Committed' (default) ensures immediate visibility
+    const user = await prisma.$transaction(
+      async (tx) => {
+        return await tx.user.upsert({
+          where: { email },
+          update: {
+            // Update role and password in case user already exists with different values
+            role,
+            passwordHash,
+            name: 'Test User',
+          },
+          create: {
+            email,
+            name: 'Test User',
+            passwordHash,
+            role,
+          },
+        });
       },
-      create: {
-        email,
-        name: 'Test User',
-        passwordHash,
-        role,
+      {
+        isolationLevel: 'ReadCommitted', // Explicitly set for immediate visibility
       },
-    });
+    );
     
     // Verify user was created/updated
     if (!user || !user.id) {
       throw new Error(`Failed to create/update user with email ${email}`);
     }
+    
+    // Small delay to ensure transaction is committed and visible across connections
+    // Increased delay for better reliability in CI
+    await new Promise((resolve) => setTimeout(resolve, 100));
     
     return user;
   } catch (error) {
@@ -126,22 +144,35 @@ export async function createTestCategory(name: string, slug?: string) {
   // 2. cleanupDatabase() already handles proper deletion order
   // 3. Upsert is atomic and doesn't violate foreign key constraints
   try {
-    const category = await prisma.category.upsert({
-      where: { slug: categorySlug },
-      update: {
-        // Update name in case slug matches but name is different
-        name,
+    // Use a transaction to ensure the category is committed and visible immediately
+    // Using isolation level 'Read Committed' (default) ensures immediate visibility
+    const category = await prisma.$transaction(
+      async (tx) => {
+        return await tx.category.upsert({
+          where: { slug: categorySlug },
+          update: {
+            // Update name in case slug matches but name is different
+            name,
+          },
+          create: {
+            name,
+            slug: categorySlug,
+          },
+        });
       },
-      create: {
-        name,
-        slug: categorySlug,
+      {
+        isolationLevel: 'ReadCommitted', // Explicitly set for immediate visibility
       },
-    });
+    );
     
     // Verify category was created/updated
     if (!category || !category.id) {
       throw new Error(`Failed to create/update category with slug ${categorySlug}`);
     }
+    
+    // Small delay to ensure transaction is committed and visible across connections
+    // Increased delay for better reliability in CI
+    await new Promise((resolve) => setTimeout(resolve, 100));
     
     // Retry logic to ensure category is visible in database (handles CI transaction/visibility issues)
     let verifyCategory = null;
@@ -225,39 +256,97 @@ export async function createTestProduct(
   });
 }
 
+// Simple mutex to prevent concurrent TRUNCATE operations (prevents deadlocks)
+let cleanupInProgress = false;
+const cleanupQueue: Array<() => void> = [];
+
+async function waitForCleanup(): Promise<void> {
+  if (!cleanupInProgress) {
+    return;
+  }
+  return new Promise<void>((resolve) => {
+    cleanupQueue.push(resolve);
+  });
+}
+
 export async function cleanupDatabase() {
-  // Use TRUNCATE with CASCADE for robust, fast cleanup
-  // This approach:
-  // 1. Handles foreign key constraints automatically with CASCADE
-  // 2. Resets auto-increment sequences with RESTART IDENTITY
-  // 3. Is atomic and much faster than individual deleteMany() calls
-  // 4. Prevents orphaned records and FK violations
+  // Wait for any ongoing cleanup to complete (prevents deadlocks from concurrent TRUNCATE)
+  await waitForCleanup();
+  
+  // Small random delay to stagger cleanup operations (helps prevent deadlocks in CI)
+  // Even with singleThread, test files might initialize cleanup at similar times
+  await new Promise((resolve) => setTimeout(resolve, Math.random() * 50));
+  
+  cleanupInProgress = true;
   
   try {
-    // Get all tables in the public schema (Postgres)
-    // Exclude Prisma migration tables (_prisma_migrations)
-    const tables: Array<{ tablename: string }> = (await prisma.$queryRawUnsafe(
-      `SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename NOT LIKE '_prisma_%' ORDER BY tablename;`,
-    )) as Array<{ tablename: string }>;
-
-    if (tables.length === 0) {
-      // No tables found, nothing to clean
-      return;
-    }
-
-    // Build TRUNCATE statement with all tables
-    // CASCADE automatically handles foreign key dependencies
-    // RESTART IDENTITY resets auto-increment sequences
-    const tableNames = tables.map((t) => `"${t.tablename}"`).join(', ');
-
-    await prisma.$executeRawUnsafe(
-      `TRUNCATE TABLE ${tableNames} RESTART IDENTITY CASCADE;`,
-    );
+    // Use TRUNCATE with CASCADE for robust, fast cleanup
+    // This approach:
+    // 1. Handles foreign key constraints automatically with CASCADE
+    // 2. Resets auto-increment sequences with RESTART IDENTITY
+    // 3. Is atomic and much faster than individual deleteMany() calls
+    // 4. Prevents orphaned records and FK violations
     
-    // Longer delay to ensure TRUNCATE transaction is fully committed and visible
-    // This helps prevent race conditions in CI environments where connection pooling
-    // or transaction isolation might cause visibility delays
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Retry logic for deadlock handling (PostgreSQL deadlock code: 40P01)
+    const maxRetries = 5;
+    let lastError: unknown = null;
+    
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      if (attempt > 0) {
+        // Exponential backoff: 50ms, 100ms, 200ms, 400ms
+        await new Promise((resolve) => setTimeout(resolve, 50 * Math.pow(2, attempt - 1)));
+      }
+      
+      try {
+        // Get all tables in the public schema (Postgres)
+        // Exclude Prisma migration tables (_prisma_migrations)
+        const tables: Array<{ tablename: string }> = (await prisma.$queryRawUnsafe(
+          `SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename NOT LIKE '_prisma_%' ORDER BY tablename;`,
+        )) as Array<{ tablename: string }>;
+
+        if (tables.length === 0) {
+          // No tables found, nothing to clean
+          return;
+        }
+
+        // Build TRUNCATE statement with all tables
+        // CASCADE automatically handles foreign key dependencies
+        // RESTART IDENTITY resets auto-increment sequences
+        const tableNames = tables.map((t) => `"${t.tablename}"`).join(', ');
+
+        await prisma.$executeRawUnsafe(
+          `TRUNCATE TABLE ${tableNames} RESTART IDENTITY CASCADE;`,
+        );
+        
+        // Longer delay to ensure TRUNCATE transaction is fully committed and visible
+        // This helps prevent race conditions in CI environments where connection pooling
+        // or transaction isolation might cause visibility delays
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        
+        // Success - break out of retry loop
+        return;
+      } catch (error: unknown) {
+        lastError = error;
+        
+        // Check if it's a deadlock error (PostgreSQL error code 40P01)
+        if (
+          typeof error === 'object' &&
+          error !== null &&
+          'code' in error &&
+          (error.code === '40P01' || error.code === 'P2010')
+        ) {
+          // Deadlock detected - will retry
+          if (attempt < maxRetries - 1) {
+            continue;
+          }
+        }
+        // If not a deadlock or max retries reached, fall through to fallback
+        break;
+      }
+    }
+    
+    // If TRUNCATE failed after retries, fall back to deleteMany
+    throw lastError;
   } catch (error) {
     // If TRUNCATE fails, fall back to individual deleteMany calls
     // This provides a safety net if TRUNCATE is not available or fails
@@ -329,6 +418,16 @@ export async function cleanupDatabase() {
       await prisma.user.deleteMany();
     } catch {
       // Ignore errors in fallback
+    }
+    
+    // Delay after fallback cleanup to ensure deletes are visible
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  } finally {
+    // Release mutex and notify waiting operations
+    cleanupInProgress = false;
+    const next = cleanupQueue.shift();
+    if (next) {
+      next();
     }
   }
 }
