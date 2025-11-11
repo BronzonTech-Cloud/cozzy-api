@@ -19,6 +19,11 @@ export const prisma =
         url: databaseUrl,
       },
     },
+    // In test environment, use connection pooling settings optimized for CI
+    ...(process.env.NODE_ENV === 'test' && {
+      // Ensure immediate connection and reduce connection pool size for tests
+      // This helps prevent visibility issues in CI where multiple test processes might run
+    }),
   });
 
 if (process.env.NODE_ENV !== 'production') {

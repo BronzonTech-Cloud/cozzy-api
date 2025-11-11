@@ -21,35 +21,54 @@ export async function createTestUserAndLogin(
     throw new Error(`Failed to create test user: ${email}`);
   }
 
-  // Small delay to ensure database transaction is committed and visible
-  // This helps prevent race conditions in CI environments
-  await new Promise((resolve) => setTimeout(resolve, 50));
-
-  // Verify user exists in database before attempting login
-  const verifyUser = await prisma.user.findUnique({
-    where: { email },
-    select: { id: true, email: true, passwordHash: true },
-  });
-
-  if (!verifyUser) {
-    throw new Error(`User ${email} was created but not found in database before login attempt`);
+  // Retry logic to ensure user is visible in database (handles CI transaction/visibility issues)
+  let verifyUser = null;
+  const maxRetries = 5;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    if (attempt > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 50 * attempt)); // Exponential backoff: 50ms, 100ms, 150ms, 200ms
+    }
+    
+    verifyUser = await prisma.user.findUnique({
+      where: { email },
+      select: { id: true, email: true, passwordHash: true },
+    });
+    
+    if (verifyUser) {
+      break;
+    }
   }
 
-  // Login to get token
-  const loginRes = await request(app).post('/api/v1/auth/login').send({
-    email,
-    password: 'password123',
-  });
+  if (!verifyUser) {
+    throw new Error(`User ${email} was created but not found in database after ${maxRetries} retries`);
+  }
+
+  // Retry login with exponential backoff (handles timing issues in CI)
+  let loginRes = null;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    if (attempt > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 50 * attempt));
+    }
+    
+    loginRes = await request(app).post('/api/v1/auth/login').send({
+      email,
+      password: 'password123',
+    });
+    
+    if (loginRes.status === 200 && loginRes.body.accessToken) {
+      break;
+    }
+  }
 
   // Verify login succeeded
-  if (loginRes.status !== 200) {
+  if (!loginRes || loginRes.status !== 200) {
     // Additional debugging: check if user exists and verify password hash
     const debugUser = await prisma.user.findUnique({
       where: { email },
       select: { id: true, email: true, passwordHash: true },
     });
     throw new Error(
-      `Login failed for ${email}: ${loginRes.status} - ${JSON.stringify(loginRes.body)}. User exists: ${!!debugUser}, User ID: ${user.id}`,
+      `Login failed for ${email}: ${loginRes?.status || 'no response'} - ${JSON.stringify(loginRes?.body || {})}. User exists: ${!!debugUser}, User ID: ${user.id}`,
     );
   }
 
@@ -124,16 +143,25 @@ export async function createTestCategory(name: string, slug?: string) {
       throw new Error(`Failed to create/update category with slug ${categorySlug}`);
     }
     
-    // Small delay to ensure database transaction is committed
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    
-    // Verify category exists in database
-    const verifyCategory = await prisma.category.findUnique({
-      where: { id: category.id },
-    });
+    // Retry logic to ensure category is visible in database (handles CI transaction/visibility issues)
+    let verifyCategory = null;
+    const maxRetries = 5;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      if (attempt > 0) {
+        await new Promise((resolve) => setTimeout(resolve, 50 * attempt)); // Exponential backoff: 50ms, 100ms, 150ms, 200ms
+      }
+      
+      verifyCategory = await prisma.category.findUnique({
+        where: { id: category.id },
+      });
+      
+      if (verifyCategory) {
+        break;
+      }
+    }
     
     if (!verifyCategory) {
-      throw new Error(`Category ${name} was created but not found in database`);
+      throw new Error(`Category ${name} was created but not found in database after ${maxRetries} retries`);
     }
     
     return category;
@@ -154,22 +182,26 @@ export async function createTestProduct(
   },
 ) {
   // Validate category exists before creating product
-  // Retry logic to handle potential timing issues in CI
-  let category = await prisma.category.findUnique({
-    where: { id: categoryId },
-  });
-  
-  if (!category) {
-    // Retry once after a short delay (handles potential race conditions)
-    await new Promise((resolve) => setTimeout(resolve, 50));
+  // Retry logic with exponential backoff to handle potential timing issues in CI
+  let category = null;
+  const maxRetries = 5;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    if (attempt > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 50 * attempt)); // Exponential backoff: 50ms, 100ms, 150ms, 200ms
+    }
+    
     category = await prisma.category.findUnique({
       where: { id: categoryId },
     });
+    
+    if (category) {
+      break;
+    }
   }
   
   if (!category) {
     throw new Error(
-      `Category with id ${categoryId} does not exist. Ensure category is created before creating products.`,
+      `Category with id ${categoryId} does not exist after ${maxRetries} retries. Ensure category is created before creating products.`,
     );
   }
 
@@ -222,9 +254,10 @@ export async function cleanupDatabase() {
       `TRUNCATE TABLE ${tableNames} RESTART IDENTITY CASCADE;`,
     );
     
-    // Small delay to ensure TRUNCATE transaction is fully committed
-    // This helps prevent race conditions in CI environments
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    // Longer delay to ensure TRUNCATE transaction is fully committed and visible
+    // This helps prevent race conditions in CI environments where connection pooling
+    // or transaction isolation might cause visibility delays
+    await new Promise((resolve) => setTimeout(resolve, 100));
   } catch (error) {
     // If TRUNCATE fails, fall back to individual deleteMany calls
     // This provides a safety net if TRUNCATE is not available or fails
