@@ -60,7 +60,10 @@ jobs:
           # Minimal env vars for migration (JWT secrets not needed for migrations)
           JWT_ACCESS_SECRET: test_access_secret_key_min_32_chars
           JWT_REFRESH_SECRET: test_refresh_secret_key_min_32_chars
-        run: bun run test:db:prepare
+        run: |
+          # Reset database to ensure clean state before tests
+          bunx prisma migrate reset --force --skip-seed || bunx prisma db push --accept-data-loss --skip-generate
+          bun run test:db:prepare
 
       - name: Lint
         run: bun run lint

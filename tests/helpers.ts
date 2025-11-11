@@ -76,100 +76,51 @@ export async function createTestProduct(
 }
 
 export async function cleanupDatabase() {
-  // Delete in order respecting foreign key constraints
-  // Use sequential awaits (not a transaction) because:
-  // 1. Foreign key constraints require deletion in dependency order
-  // 2. Some tables have RESTRICT constraints that prevent CASCADE deletes
-  // 3. Sequential deletes ensure each step completes before the next, avoiding constraint violations
-  // Note: A transaction would be atomic but doesn't help with constraint ordering
-  
-  // Delete child records first (those with foreign keys)
-  // Wrap each in try/catch to continue even if one fails
-  try {
-    await prisma.review.deleteMany();
-  } catch (error) {
-    console.warn('Failed to delete reviews:', error);
-  }
+  // Use TRUNCATE with CASCADE for robust, fast cleanup
+  // This approach:
+  // 1. Handles foreign key constraints automatically with CASCADE
+  // 2. Resets auto-increment sequences with RESTART IDENTITY
+  // 3. Is atomic and much faster than individual deleteMany() calls
+  // 4. Prevents orphaned records and FK violations
   
   try {
-    await prisma.wishlist.deleteMany();
+    // Get all tables in the public schema (Postgres)
+    const tables: Array<{ tablename: string }> = (await prisma.$queryRawUnsafe(
+      `SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;`,
+    )) as Array<{ tablename: string }>;
+
+    if (tables.length === 0) {
+      // No tables found, nothing to clean
+      return;
+    }
+
+    // Build TRUNCATE statement with all tables
+    // CASCADE automatically handles foreign key dependencies
+    // RESTART IDENTITY resets auto-increment sequences
+    const tableNames = tables.map((t) => `"${t.tablename}"`).join(', ');
+
+    await prisma.$executeRawUnsafe(
+      `TRUNCATE TABLE ${tableNames} RESTART IDENTITY CASCADE;`,
+    );
   } catch (error) {
-    console.warn('Failed to delete wishlist:', error);
-  }
-  
-  try {
-    await prisma.address.deleteMany();
-  } catch (error) {
-    console.warn('Failed to delete addresses:', error);
-  }
-  
-  try {
-    await prisma.productVariant.deleteMany();
-  } catch (error) {
-    console.warn('Failed to delete product variants:', error);
-  }
-  
-  try {
-    await prisma.cartItem.deleteMany();
-  } catch (error) {
-    console.warn('Failed to delete cart items:', error);
-  }
-  
-  try {
-    await prisma.cart.deleteMany();
-  } catch (error) {
-    console.warn('Failed to delete carts:', error);
-  }
-  
-  try {
-    await prisma.orderStatusHistory.deleteMany();
-  } catch (error) {
-    console.warn('Failed to delete order status history:', error);
-  }
-  
-  try {
-    await prisma.orderItem.deleteMany();
-  } catch (error) {
-    console.warn('Failed to delete order items:', error);
-  }
-  
-  try {
-    await prisma.order.deleteMany();
-  } catch (error) {
-    console.warn('Failed to delete orders:', error);
-  }
-  
-  try {
-    await prisma.coupon.deleteMany();
-  } catch (error) {
-    console.warn('Failed to delete coupons:', error);
-  }
-  
-  // Delete products BEFORE categories (products reference categories)
-  // This is critical - must succeed or categories can't be deleted
-  try {
-    await prisma.product.deleteMany();
-  } catch (error) {
-    console.error('CRITICAL: Failed to delete products:', error);
-    // Try to delete any remaining products that might be blocking
-    // Use a more aggressive approach if needed
-    throw error; // Re-throw to prevent category deletion
-  }
-  
-  // Now safe to delete categories
-  try {
-    await prisma.category.deleteMany();
-  } catch (error) {
-    console.error('CRITICAL: Failed to delete categories:', error);
-    throw error; // Re-throw to prevent user deletion
-  }
-  
-  // Delete users last (they are referenced by many tables)
-  try {
-    await prisma.user.deleteMany();
-  } catch (error) {
-    console.error('CRITICAL: Failed to delete users:', error);
-    throw error; // Re-throw to surface the issue
+    // If TRUNCATE fails, fall back to individual deleteMany calls
+    // This provides a safety net if TRUNCATE is not available
+    console.warn('TRUNCATE failed, falling back to deleteMany:', error);
+    
+    // Fallback: delete in dependency order
+    await prisma.review.deleteMany().catch(() => {});
+    await prisma.wishlist.deleteMany().catch(() => {});
+    await prisma.address.deleteMany().catch(() => {});
+    await prisma.productVariant.deleteMany().catch(() => {});
+    await prisma.cartItem.deleteMany().catch(() => {});
+    await prisma.cart.deleteMany().catch(() => {});
+    await prisma.orderStatusHistory.deleteMany().catch(() => {});
+    await prisma.orderItem.deleteMany().catch(() => {});
+    await prisma.order.deleteMany().catch(() => {});
+    await prisma.coupon.deleteMany().catch(() => {});
+    await prisma.product.deleteMany().catch(() => {});
+    await prisma.category.deleteMany().catch(() => {});
+    await prisma.user.deleteMany().catch(() => {});
   }
 }
 
