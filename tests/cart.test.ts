@@ -181,6 +181,7 @@ describe('Cart', () => {
 
       expect(addRes.status).toBe(201);
       expect(addRes.body).toHaveProperty('item');
+      expect(addRes.body.item).not.toBeNull();
       expect(addRes.body.item).toHaveProperty('id');
       cartItemId = addRes.body.item.id;
     });
@@ -243,6 +244,7 @@ describe('Cart', () => {
 
       expect(addRes.status).toBe(201);
       expect(addRes.body).toHaveProperty('item');
+      expect(addRes.body.item).not.toBeNull();
       expect(addRes.body.item).toHaveProperty('id');
       cartItemId = addRes.body.item.id;
     });

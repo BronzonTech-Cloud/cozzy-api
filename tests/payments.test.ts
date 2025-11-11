@@ -78,6 +78,7 @@ describe('Payments', () => {
 
     expect(orderRes.status).toBe(201);
     expect(orderRes.body).toHaveProperty('order');
+    expect(orderRes.body.order).not.toBeNull();
     expect(orderRes.body.order).toHaveProperty('id');
     orderId = orderRes.body.order.id;
   });
