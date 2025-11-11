@@ -6,21 +6,34 @@ export async function createTestUser(email: string, role: 'USER' | 'ADMIN' = 'US
   // Use upsert to atomically create or update user, avoiding unique constraint violations
   // This is more reliable than delete-then-create, especially in CI environments
   const passwordHash = await bcrypt.hash('password123', 10);
-  return prisma.user.upsert({
-    where: { email },
-    update: {
-      // Update role and password in case user already exists with different values
-      role,
-      passwordHash,
-      name: 'Test User',
-    },
-    create: {
-      email,
-      name: 'Test User',
-      passwordHash,
-      role,
-    },
-  });
+  
+  try {
+    const user = await prisma.user.upsert({
+      where: { email },
+      update: {
+        // Update role and password in case user already exists with different values
+        role,
+        passwordHash,
+        name: 'Test User',
+      },
+      create: {
+        email,
+        name: 'Test User',
+        passwordHash,
+        role,
+      },
+    });
+    
+    // Verify user was created/updated
+    if (!user || !user.id) {
+      throw new Error(`Failed to create/update user with email ${email}`);
+    }
+    
+    return user;
+  } catch (error) {
+    console.error(`Error creating test user ${email}:`, error);
+    throw error;
+  }
 }
 
 export async function createTestCategory(name: string, slug?: string) {
@@ -32,17 +45,29 @@ export async function createTestCategory(name: string, slug?: string) {
   // 1. Categories may have products referencing them (foreign key constraint)
   // 2. cleanupDatabase() already handles proper deletion order
   // 3. Upsert is atomic and doesn't violate foreign key constraints
-  return prisma.category.upsert({
-    where: { slug: categorySlug },
-    update: {
-      // Update name in case slug matches but name is different
-      name,
-    },
-    create: {
-      name,
-      slug: categorySlug,
-    },
-  });
+  try {
+    const category = await prisma.category.upsert({
+      where: { slug: categorySlug },
+      update: {
+        // Update name in case slug matches but name is different
+        name,
+      },
+      create: {
+        name,
+        slug: categorySlug,
+      },
+    });
+    
+    // Verify category was created/updated
+    if (!category || !category.id) {
+      throw new Error(`Failed to create/update category with slug ${categorySlug}`);
+    }
+    
+    return category;
+  } catch (error) {
+    console.error(`Error creating test category ${name} (slug: ${categorySlug}):`, error);
+    throw error;
+  }
 }
 
 export async function createTestProduct(
@@ -55,6 +80,17 @@ export async function createTestProduct(
     active?: boolean;
   },
 ) {
+  // Validate category exists before creating product
+  const category = await prisma.category.findUnique({
+    where: { id: categoryId },
+  });
+  
+  if (!category) {
+    throw new Error(
+      `Category with id ${categoryId} does not exist. Ensure category is created before creating products.`,
+    );
+  }
+
   // Generate unique slug to avoid unique constraint violations
   // Use timestamp + random number to ensure uniqueness across test runs
   const baseSlug = data?.slug || (data?.title || 'test-product').toLowerCase().replace(/\s+/g, '-');
@@ -85,8 +121,9 @@ export async function cleanupDatabase() {
   
   try {
     // Get all tables in the public schema (Postgres)
+    // Exclude Prisma migration tables (_prisma_migrations)
     const tables: Array<{ tablename: string }> = (await prisma.$queryRawUnsafe(
-      `SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;`,
+      `SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename NOT LIKE '_prisma_%' ORDER BY tablename;`,
     )) as Array<{ tablename: string }>;
 
     if (tables.length === 0) {
@@ -102,25 +139,82 @@ export async function cleanupDatabase() {
     await prisma.$executeRawUnsafe(
       `TRUNCATE TABLE ${tableNames} RESTART IDENTITY CASCADE;`,
     );
+    
+    // Small delay to ensure TRUNCATE transaction is fully committed
+    // This helps prevent race conditions in CI environments
+    await new Promise((resolve) => setTimeout(resolve, 10));
   } catch (error) {
     // If TRUNCATE fails, fall back to individual deleteMany calls
-    // This provides a safety net if TRUNCATE is not available
+    // This provides a safety net if TRUNCATE is not available or fails
     console.warn('TRUNCATE failed, falling back to deleteMany:', error);
     
     // Fallback: delete in dependency order
-    await prisma.review.deleteMany().catch(() => {});
-    await prisma.wishlist.deleteMany().catch(() => {});
-    await prisma.address.deleteMany().catch(() => {});
-    await prisma.productVariant.deleteMany().catch(() => {});
-    await prisma.cartItem.deleteMany().catch(() => {});
-    await prisma.cart.deleteMany().catch(() => {});
-    await prisma.orderStatusHistory.deleteMany().catch(() => {});
-    await prisma.orderItem.deleteMany().catch(() => {});
-    await prisma.order.deleteMany().catch(() => {});
-    await prisma.coupon.deleteMany().catch(() => {});
-    await prisma.product.deleteMany().catch(() => {});
-    await prisma.category.deleteMany().catch(() => {});
-    await prisma.user.deleteMany().catch(() => {});
+    // Use individual try/catch to ensure we continue even if one fails
+    try {
+      await prisma.review.deleteMany();
+    } catch {
+      // Ignore errors in fallback
+    }
+    try {
+      await prisma.wishlist.deleteMany();
+    } catch {
+      // Ignore errors in fallback
+    }
+    try {
+      await prisma.address.deleteMany();
+    } catch {
+      // Ignore errors in fallback
+    }
+    try {
+      await prisma.productVariant.deleteMany();
+    } catch {
+      // Ignore errors in fallback
+    }
+    try {
+      await prisma.cartItem.deleteMany();
+    } catch {
+      // Ignore errors in fallback
+    }
+    try {
+      await prisma.cart.deleteMany();
+    } catch {
+      // Ignore errors in fallback
+    }
+    try {
+      await prisma.orderStatusHistory.deleteMany();
+    } catch {
+      // Ignore errors in fallback
+    }
+    try {
+      await prisma.orderItem.deleteMany();
+    } catch {
+      // Ignore errors in fallback
+    }
+    try {
+      await prisma.order.deleteMany();
+    } catch {
+      // Ignore errors in fallback
+    }
+    try {
+      await prisma.coupon.deleteMany();
+    } catch {
+      // Ignore errors in fallback
+    }
+    try {
+      await prisma.product.deleteMany();
+    } catch {
+      // Ignore errors in fallback
+    }
+    try {
+      await prisma.category.deleteMany();
+    } catch {
+      // Ignore errors in fallback
+    }
+    try {
+      await prisma.user.deleteMany();
+    } catch {
+      // Ignore errors in fallback
+    }
   }
 }
 
