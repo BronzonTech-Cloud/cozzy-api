@@ -16,9 +16,13 @@ export function createApp() {
   const app = express();
 
   // Trust proxy for accurate IP detection in production/CI
-  // In test environment, this helps rate limiting work correctly
-  if (env.NODE_ENV === 'production' || env.NODE_ENV === 'test') {
+  // In test environment, trust only localhost to avoid security warnings
+  if (env.NODE_ENV === 'production') {
     app.set('trust proxy', true);
+  } else if (env.NODE_ENV === 'test') {
+    // In test environment, only trust localhost to satisfy rate limiter validation
+    // This prevents the ERR_ERL_PERMISSIVE_TRUST_PROXY warning
+    app.set('trust proxy', 1); // Trust only first proxy (localhost in CI)
   }
 
   // Configure Helmet with CSP that allows ReDoc

@@ -1,4 +1,4 @@
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { Request } from 'express';
 import { isIP } from 'net';
 
@@ -36,41 +36,55 @@ export function createRateLimiter(options: {
    * only be trusted when behind a properly configured reverse proxy/load balancer.
    * Ensure Express trust proxy is configured (app.set('trust proxy', true)) and
    * that your proxy strips or validates these headers from untrusted sources.
+   *
+   * Uses ipKeyGenerator helper from express-rate-limit for IPv6 compatibility.
    */
   const defaultKeyGenerator = (req: Request): string => {
+    // Extract IP address first
+    let detectedIp: string | undefined;
+
     // Try req.ip first (requires trust proxy to be configured)
     // Validate that req.ip is a real IP address
     if (req.ip && isIP(req.ip) !== 0) {
-      return req.ip;
+      detectedIp = req.ip;
     }
-
     // Try X-Forwarded-For header (first IP in the chain)
     // WARNING: This header can be spoofed by clients - only trust behind a proxy
-    const forwardedFor = req.headers['x-forwarded-for'];
-    if (forwardedFor) {
+    else if (req.headers['x-forwarded-for']) {
+      const forwardedFor = req.headers['x-forwarded-for'];
       const ips = typeof forwardedFor === 'string' ? forwardedFor.split(',') : forwardedFor;
       const firstIp = ips[0]?.trim();
       // Validate that the extracted IP is a real IP address
       if (firstIp && isIP(firstIp) !== 0) {
-        return firstIp;
+        detectedIp = firstIp;
       }
     }
-
     // Try X-Real-IP header
     // WARNING: This header can be spoofed by clients - only trust behind a proxy
-    const realIp = req.headers['x-real-ip'];
-    if (realIp && typeof realIp === 'string') {
-      const trimmedIp = realIp.trim();
-      // Validate that the extracted IP is a real IP address
-      if (isIP(trimmedIp) !== 0) {
-        return trimmedIp;
+    else if (req.headers['x-real-ip']) {
+      const realIp = req.headers['x-real-ip'];
+      if (typeof realIp === 'string') {
+        const trimmedIp = realIp.trim();
+        // Validate that the extracted IP is a real IP address
+        if (isIP(trimmedIp) !== 0) {
+          detectedIp = trimmedIp;
+        }
       }
     }
-
     // Try socket remote address as fallback
-    const socketRemoteAddress = req.socket?.remoteAddress;
-    if (socketRemoteAddress && isIP(socketRemoteAddress) !== 0) {
-      return socketRemoteAddress;
+    else if (req.socket?.remoteAddress && isIP(req.socket.remoteAddress) !== 0) {
+      detectedIp = req.socket.remoteAddress;
+    }
+
+    // If we have a valid IP, use ipKeyGenerator helper for proper IPv6 handling
+    // This ensures compatibility with express-rate-limit's validation
+    if (detectedIp) {
+      try {
+        return ipKeyGenerator(detectedIp);
+      } catch {
+        // If ipKeyGenerator fails, return the IP directly
+        return detectedIp;
+      }
     }
 
     // If IP detection fails, log for debugging (optional)
@@ -152,30 +166,47 @@ export const adminLimiter = createRateLimiter({
     if (req.user?.id) {
       return req.user.id;
     }
-    // Use robust IP detection with validation (same as defaultKeyGenerator logic)
+    // Extract IP address first
+    let detectedIp: string | undefined;
+
+    // Try req.ip first (requires trust proxy to be configured)
     if (req.ip && isIP(req.ip) !== 0) {
-      return req.ip;
+      detectedIp = req.ip;
     }
-    const forwardedFor = req.headers['x-forwarded-for'];
-    if (forwardedFor) {
+    // Try X-Forwarded-For header
+    else if (req.headers['x-forwarded-for']) {
+      const forwardedFor = req.headers['x-forwarded-for'];
       const ips = typeof forwardedFor === 'string' ? forwardedFor.split(',') : forwardedFor;
       const firstIp = ips[0]?.trim();
       if (firstIp && isIP(firstIp) !== 0) {
-        return firstIp;
+        detectedIp = firstIp;
       }
     }
-    const realIp = req.headers['x-real-ip'];
-    if (realIp && typeof realIp === 'string') {
-      const trimmedIp = realIp.trim();
-      if (isIP(trimmedIp) !== 0) {
-        return trimmedIp;
+    // Try X-Real-IP header
+    else if (req.headers['x-real-ip']) {
+      const realIp = req.headers['x-real-ip'];
+      if (typeof realIp === 'string') {
+        const trimmedIp = realIp.trim();
+        if (isIP(trimmedIp) !== 0) {
+          detectedIp = trimmedIp;
+        }
       }
     }
     // Try socket remote address as fallback
-    const socketRemoteAddress = req.socket?.remoteAddress;
-    if (socketRemoteAddress && isIP(socketRemoteAddress) !== 0) {
-      return socketRemoteAddress;
+    else if (req.socket?.remoteAddress && isIP(req.socket.remoteAddress) !== 0) {
+      detectedIp = req.socket.remoteAddress;
     }
+
+    // If we have a valid IP, use ipKeyGenerator helper for proper IPv6 handling
+    if (detectedIp) {
+      try {
+        return ipKeyGenerator(detectedIp);
+      } catch {
+        // If ipKeyGenerator fails, return the IP directly
+        return detectedIp;
+      }
+    }
+
     // Final fallback: return a stable identifier
     return 'unknown-client';
   },
