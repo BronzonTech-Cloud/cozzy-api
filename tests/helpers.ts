@@ -4,6 +4,12 @@ import request from 'supertest';
 
 import { prisma } from '../src/config/prisma';
 
+// Configurable retry settings via environment variables (useful for CI tuning)
+const VERIFICATION_MAX_RETRIES = parseInt(process.env.TEST_VERIFICATION_MAX_RETRIES || '15', 10);
+const VERIFICATION_TIMEOUT_MS = parseInt(process.env.TEST_VERIFICATION_TIMEOUT_MS || '30000', 10); // 30 seconds default
+const LOGIN_MAX_RETRIES = parseInt(process.env.TEST_LOGIN_MAX_RETRIES || '10', 10);
+const CATEGORY_VERIFICATION_MAX_RETRIES = parseInt(process.env.TEST_CATEGORY_VERIFICATION_MAX_RETRIES || '15', 10);
+
 /**
  * Helper to create a test user and get their auth token
  * Ensures user exists and login succeeds before returning token
@@ -26,9 +32,18 @@ export async function createTestUserAndLogin(
   
   // Retry logic to ensure user is visible in database (handles CI transaction/visibility issues)
   // Use raw query to bypass Prisma's connection pool caching
+  // Add timeout to prevent infinite loops
+  const verificationStartTime = Date.now();
   let verifyUser = null;
-  const maxRetries = 10;
+  const maxRetries = VERIFICATION_MAX_RETRIES;
+  
   for (let attempt = 0; attempt < maxRetries; attempt++) {
+    // Check timeout
+    if (Date.now() - verificationStartTime > VERIFICATION_TIMEOUT_MS) {
+      throw new Error(
+        `User verification timeout after ${VERIFICATION_TIMEOUT_MS}ms for ${email} in createTestUserAndLogin`,
+      );
+    }
     if (attempt > 0) {
       // Exponential backoff: 100ms, 200ms, 300ms, 400ms, 500ms, etc.
       await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
@@ -50,10 +65,17 @@ export async function createTestUserAndLogin(
   }
 
   // Retry login with exponential backoff (handles timing issues in CI)
-  // Increased retries for better reliability
+  // Add timeout to prevent infinite loops
+  const loginStartTime = Date.now();
+  const loginTimeoutMs = VERIFICATION_TIMEOUT_MS; // Use same timeout as verification
   let loginRes = null;
-  const loginMaxRetries = 10;
+  const loginMaxRetries = LOGIN_MAX_RETRIES;
+  
   for (let attempt = 0; attempt < loginMaxRetries; attempt++) {
+    // Check timeout
+    if (Date.now() - loginStartTime > loginTimeoutMs) {
+      throw new Error(`Login timeout after ${loginTimeoutMs}ms for ${email}`);
+    }
     if (attempt > 0) {
       // Exponential backoff: 100ms, 200ms, 300ms, 400ms, 500ms, etc.
       await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
@@ -97,57 +119,114 @@ export async function createTestUser(email: string, role: 'USER' | 'ADMIN' = 'US
   const passwordHash = await bcrypt.hash('password123', 10);
   
   try {
-    // Direct upsert (no transaction wrapper) - upsert is already atomic
-    // Transaction wrappers can cause visibility issues across connection pools in CI
-    const user = await prisma.user.upsert({
-      where: { email },
-      update: {
-        // Update role and password in case user already exists with different values
-        role,
-        passwordHash,
-        name: 'Test User',
+    // Use explicit transaction to ensure atomicity and immediate commit
+    // This ensures the record is committed before we try to verify it
+    const user = await prisma.$transaction(
+      async (tx) => {
+        return await tx.user.upsert({
+          where: { email },
+          update: {
+            // Update role and password in case user already exists with different values
+            role,
+            passwordHash,
+            name: 'Test User',
+          },
+          create: {
+            email,
+            name: 'Test User',
+            passwordHash,
+            role,
+          },
+        });
       },
-      create: {
-        email,
-        name: 'Test User',
-        passwordHash,
-        role,
+      {
+        isolationLevel: 'ReadCommitted',
+        timeout: 10000, // 10 second timeout
       },
-    });
+    );
     
     // Verify user was created/updated
     if (!user || !user.id) {
       throw new Error(`Failed to create/update user with email ${email}`);
     }
     
-    // Force connection refresh using raw SQL (bypasses Prisma connection pool caching)
-    // This ensures the record is visible to subsequent queries
+    // Note: The transaction is already committed when $transaction completes.
+    // This query ensures we're using a fresh connection and can see the committed data.
     await prisma.$executeRaw`SELECT 1`;
     
-    // Delay to ensure commit is visible across all connections
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    // Additional delay to ensure commit is visible across all connections
+    // Increased delay for CI environments where database might be slower
+    await new Promise((resolve) => setTimeout(resolve, 200));
     
-    // Verify user is visible using raw query (bypasses Prisma's connection pool)
+    // Verify user is visible using both raw query and Prisma query
+    // Try raw query first (bypasses connection pool), then fallback to Prisma
+    // Add timeout to prevent infinite loops
+    const verificationStartTime = Date.now();
     let verifyUser = null;
-    const maxRetries = 10;
+    const maxRetries = VERIFICATION_MAX_RETRIES;
+    
     for (let attempt = 0; attempt < maxRetries; attempt++) {
+      // Check timeout
+      if (Date.now() - verificationStartTime > VERIFICATION_TIMEOUT_MS) {
+        throw new Error(
+          `User verification timeout after ${VERIFICATION_TIMEOUT_MS}ms for ${email}. User ID from upsert: ${user.id}`,
+        );
+      }
       if (attempt > 0) {
-        await new Promise((resolve) => setTimeout(resolve, 100 * attempt)); // Exponential backoff
+        // Exponential backoff: 50ms, 100ms, 150ms, 200ms, etc.
+        await new Promise((resolve) => setTimeout(resolve, 50 * attempt));
       }
       
-      // Use raw query to bypass connection pool and ensure we see the committed record
-      const result = await prisma.$queryRaw<Array<{ id: string; email: string }>>`
-        SELECT id, email FROM "User" WHERE email = ${email} LIMIT 1
-      `;
-      
-      if (result && result.length > 0) {
-        verifyUser = result[0];
-        break;
+      // Try raw query first (most reliable for seeing committed records)
+      try {
+        const rawResult = await prisma.$queryRaw<Array<{ id: string; email: string }>>`
+          SELECT id, email FROM "User" WHERE email = ${email} LIMIT 1
+        `;
+        
+        if (rawResult && rawResult.length > 0) {
+          verifyUser = rawResult[0];
+          break;
+        }
+      } catch (rawError: unknown) {
+        // If raw query fails, try Prisma query as fallback
+        // Log error in development for debugging
+        if (process.env.NODE_ENV === 'development') {
+          console.warn(`Raw query failed for user ${email} (attempt ${attempt + 1}):`, rawError);
+        }
+        
+        try {
+          const prismaUser = await prisma.user.findUnique({
+            where: { email },
+            select: { id: true, email: true },
+          });
+          
+          if (prismaUser) {
+            verifyUser = prismaUser;
+            break;
+          }
+        } catch (prismaError: unknown) {
+          // Log error in development for debugging
+          if (process.env.NODE_ENV === 'development') {
+            console.warn(`Prisma query failed for user ${email} (attempt ${attempt + 1}):`, prismaError);
+          }
+          // Continue to next retry
+        }
       }
     }
     
     if (!verifyUser) {
-      throw new Error(`User ${email} was created but not found in database after ${maxRetries} retries`);
+      // Last resort: try one more time with a longer delay
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const finalCheck = await prisma.user.findUnique({
+        where: { email },
+        select: { id: true, email: true },
+      });
+      
+      if (finalCheck) {
+        return user; // User exists, return it even though verification initially failed
+      }
+      
+      throw new Error(`User ${email} was created but not found in database after ${maxRetries} retries. User ID from upsert: ${user.id}`);
     }
     
     return user;
@@ -167,54 +246,110 @@ export async function createTestCategory(name: string, slug?: string) {
   // 2. cleanupDatabase() already handles proper deletion order
   // 3. Upsert is atomic and doesn't violate foreign key constraints
   try {
-    // Direct upsert (no transaction wrapper) - upsert is already atomic
-    // Transaction wrappers can cause visibility issues across connection pools in CI
-    const category = await prisma.category.upsert({
-      where: { slug: categorySlug },
-      update: {
-        // Update name in case slug matches but name is different
-        name,
+    // Use explicit transaction to ensure atomicity and immediate commit
+    // This ensures the record is committed before we try to verify it
+    const category = await prisma.$transaction(
+      async (tx) => {
+        return await tx.category.upsert({
+          where: { slug: categorySlug },
+          update: {
+            // Update name in case slug matches but name is different
+            name,
+          },
+          create: {
+            name,
+            slug: categorySlug,
+          },
+        });
       },
-      create: {
-        name,
-        slug: categorySlug,
+      {
+        isolationLevel: 'ReadCommitted',
+        timeout: 10000, // 10 second timeout
       },
-    });
+    );
     
     // Verify category was created/updated
     if (!category || !category.id) {
       throw new Error(`Failed to create/update category with slug ${categorySlug}`);
     }
     
-    // Force connection refresh using raw SQL (bypasses Prisma connection pool caching)
-    // This ensures the record is visible to subsequent queries
+    // Note: The transaction is already committed when $transaction completes.
+    // This query ensures we're using a fresh connection and can see the committed data.
     await prisma.$executeRaw`SELECT 1`;
     
-    // Delay to ensure commit is visible across all connections
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    // Additional delay to ensure commit is visible across all connections
+    // Increased delay for CI environments where database might be slower
+    await new Promise((resolve) => setTimeout(resolve, 200));
     
     // Retry logic to ensure category is visible in database (handles CI transaction/visibility issues)
-    // Use raw query to bypass connection pool and ensure we see the committed record
+    // Try raw query first (bypasses connection pool), then fallback to Prisma
+    // Add timeout to prevent infinite loops
+    const verificationStartTime = Date.now();
     let verifyCategory = null;
-    const maxRetries = 10;
+    const maxRetries = CATEGORY_VERIFICATION_MAX_RETRIES;
+    
     for (let attempt = 0; attempt < maxRetries; attempt++) {
+      // Check timeout
+      if (Date.now() - verificationStartTime > VERIFICATION_TIMEOUT_MS) {
+        throw new Error(
+          `Category verification timeout after ${VERIFICATION_TIMEOUT_MS}ms for ${name}. Category ID from upsert: ${category.id}`,
+        );
+      }
       if (attempt > 0) {
-        await new Promise((resolve) => setTimeout(resolve, 100 * attempt)); // Exponential backoff
+        // Exponential backoff: 50ms, 100ms, 150ms, 200ms, etc.
+        await new Promise((resolve) => setTimeout(resolve, 50 * attempt));
       }
       
-      // Use raw query to bypass Prisma's connection pool caching
-      const result = await prisma.$queryRaw<Array<{ id: string; name: string; slug: string }>>`
-        SELECT id, name, slug FROM "Category" WHERE id = ${category.id} LIMIT 1
-      `;
-      
-      if (result && result.length > 0) {
-        verifyCategory = result[0];
-        break;
+      // Try raw query first (most reliable for seeing committed records)
+      try {
+        const rawResult = await prisma.$queryRaw<Array<{ id: string; name: string; slug: string }>>`
+          SELECT id, name, slug FROM "Category" WHERE id = ${category.id} LIMIT 1
+        `;
+        
+        if (rawResult && rawResult.length > 0) {
+          verifyCategory = rawResult[0];
+          break;
+        }
+      } catch (rawError: unknown) {
+        // If raw query fails, try Prisma query as fallback
+        // Log error in development for debugging
+        if (process.env.NODE_ENV === 'development') {
+          console.warn(`Raw query failed for category ${name} (attempt ${attempt + 1}):`, rawError);
+        }
+        
+        try {
+          const prismaCategory = await prisma.category.findUnique({
+            where: { id: category.id },
+            select: { id: true, name: true, slug: true },
+          });
+          
+          if (prismaCategory) {
+            verifyCategory = prismaCategory;
+            break;
+          }
+        } catch (prismaError: unknown) {
+          // Log error in development for debugging
+          if (process.env.NODE_ENV === 'development') {
+            console.warn(`Prisma query failed for category ${name} (attempt ${attempt + 1}):`, prismaError);
+          }
+          // Continue to next retry
+        }
       }
     }
     
     if (!verifyCategory) {
-      throw new Error(`Category ${name} was created but not found in database after ${maxRetries} retries`);
+      // Last resort: try one more time with a longer delay
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const finalCheck = await prisma.category.findUnique({
+        where: { id: category.id },
+        select: { id: true, name: true, slug: true },
+      });
+      
+      if (finalCheck) {
+        return category; // Category exists, return it even though verification initially failed
+      }
+      
+      throw new Error(`Category ${name} was created but not found in database after ${maxRetries} retries. Category ID from upsert: ${category.id}`);
     }
     
     return category;
@@ -237,9 +372,20 @@ export async function createTestProduct(
   // Validate category exists before creating product
   // Retry logic with exponential backoff to handle potential timing issues in CI
   // Use raw query to bypass Prisma's connection pool caching
+  // Add timeout to prevent infinite loops
+  const verificationStartTime = Date.now();
+  const categoryVerificationTimeoutMs = VERIFICATION_TIMEOUT_MS;
   let category = null;
-  const maxRetries = 10;
+  const maxRetries = VERIFICATION_MAX_RETRIES;
+  
   for (let attempt = 0; attempt < maxRetries; attempt++) {
+    // Check timeout
+    if (Date.now() - verificationStartTime > categoryVerificationTimeoutMs) {
+      throw new Error(
+        `Category verification timeout after ${categoryVerificationTimeoutMs}ms for categoryId: ${categoryId}`,
+      );
+    }
+    
     if (attempt > 0) {
       await new Promise((resolve) => setTimeout(resolve, 100 * attempt)); // Exponential backoff
     }
@@ -464,18 +610,19 @@ export async function cleanupDatabase() {
   } finally {
     // Release mutex and notify waiting operations
     cleanupInProgress = false;
+    // Process queue: notify next waiting operation
     const next = cleanupQueue.shift();
-    if (next) {
-      next();
+    if (typeof next === 'function') {
+      try {
+        next();
+      } catch (error) {
+        // Log but don't throw - queue notification errors shouldn't break cleanup
+        console.error('Error notifying cleanup queue:', error);
+      }
     }
   }
 }
 
-export async function setupTestDatabase() {
-  await cleanupDatabase();
-}
-
-export async function teardownTestDatabase() {
-  await cleanupDatabase();
-  await prisma.$disconnect();
-}
+// Note: setupTestDatabase and teardownTestDatabase were removed as they were unused.
+// If you need database setup/teardown, use cleanupDatabase() directly in beforeEach/afterEach hooks.
+// The global Prisma connection is managed by tests/setup.ts (connects in beforeAll, disconnects in afterAll).
