@@ -83,56 +83,93 @@ export async function cleanupDatabase() {
   // 3. Sequential deletes ensure each step completes before the next, avoiding constraint violations
   // Note: A transaction would be atomic but doesn't help with constraint ordering
   
+  // Delete child records first (those with foreign keys)
+  // Wrap each in try/catch to continue even if one fails
   try {
-    // Delete child records first (those with foreign keys)
     await prisma.review.deleteMany();
-    await prisma.wishlist.deleteMany();
-    await prisma.address.deleteMany();
-    await prisma.productVariant.deleteMany();
-    await prisma.cartItem.deleteMany();
-    await prisma.cart.deleteMany();
-    await prisma.orderStatusHistory.deleteMany();
-    await prisma.orderItem.deleteMany();
-    await prisma.order.deleteMany();
-    await prisma.coupon.deleteMany();
-    
-    // Delete products BEFORE categories (products reference categories)
-    await prisma.product.deleteMany();
-    
-    // Verify all products are deleted before deleting categories
-    const productCount = await prisma.product.count();
-    if (productCount > 0) {
-      // Force delete any remaining products
-      await prisma.product.deleteMany();
-    }
-    
-    // Now safe to delete categories
-    await prisma.category.deleteMany();
-    
-    // Delete users last (they are referenced by many tables)
-    await prisma.user.deleteMany();
-    
-    // Verify cleanup completed by checking user count
-    const userCount = await prisma.user.count();
-    if (userCount > 0) {
-      // Force delete all users if any remain
-      await prisma.user.deleteMany();
-    }
   } catch (error) {
-    // If cleanup fails, log the error but don't throw
-    // This allows tests to continue even if cleanup has issues
-    // The next cleanup will handle any remaining data
-    console.error('Error during database cleanup:', error);
-    
-    // Try to recover by deleting in a more aggressive order
-    try {
-      // Delete everything that might be blocking
-      await prisma.product.deleteMany().catch(() => {});
-      await prisma.category.deleteMany().catch(() => {});
-      await prisma.user.deleteMany().catch(() => {});
-    } catch (recoveryError) {
-      console.error('Error during cleanup recovery:', recoveryError);
-    }
+    console.warn('Failed to delete reviews:', error);
+  }
+  
+  try {
+    await prisma.wishlist.deleteMany();
+  } catch (error) {
+    console.warn('Failed to delete wishlist:', error);
+  }
+  
+  try {
+    await prisma.address.deleteMany();
+  } catch (error) {
+    console.warn('Failed to delete addresses:', error);
+  }
+  
+  try {
+    await prisma.productVariant.deleteMany();
+  } catch (error) {
+    console.warn('Failed to delete product variants:', error);
+  }
+  
+  try {
+    await prisma.cartItem.deleteMany();
+  } catch (error) {
+    console.warn('Failed to delete cart items:', error);
+  }
+  
+  try {
+    await prisma.cart.deleteMany();
+  } catch (error) {
+    console.warn('Failed to delete carts:', error);
+  }
+  
+  try {
+    await prisma.orderStatusHistory.deleteMany();
+  } catch (error) {
+    console.warn('Failed to delete order status history:', error);
+  }
+  
+  try {
+    await prisma.orderItem.deleteMany();
+  } catch (error) {
+    console.warn('Failed to delete order items:', error);
+  }
+  
+  try {
+    await prisma.order.deleteMany();
+  } catch (error) {
+    console.warn('Failed to delete orders:', error);
+  }
+  
+  try {
+    await prisma.coupon.deleteMany();
+  } catch (error) {
+    console.warn('Failed to delete coupons:', error);
+  }
+  
+  // Delete products BEFORE categories (products reference categories)
+  // This is critical - must succeed or categories can't be deleted
+  try {
+    await prisma.product.deleteMany();
+  } catch (error) {
+    console.error('CRITICAL: Failed to delete products:', error);
+    // Try to delete any remaining products that might be blocking
+    // Use a more aggressive approach if needed
+    throw error; // Re-throw to prevent category deletion
+  }
+  
+  // Now safe to delete categories
+  try {
+    await prisma.category.deleteMany();
+  } catch (error) {
+    console.error('CRITICAL: Failed to delete categories:', error);
+    throw error; // Re-throw to prevent user deletion
+  }
+  
+  // Delete users last (they are referenced by many tables)
+  try {
+    await prisma.user.deleteMany();
+  } catch (error) {
+    console.error('CRITICAL: Failed to delete users:', error);
+    throw error; // Re-throw to surface the issue
   }
 }
 
