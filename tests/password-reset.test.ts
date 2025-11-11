@@ -102,7 +102,7 @@ describe('Password Reset', () => {
 
     it('should reset password with valid token', async () => {
       const res = await request(app).post(`/api/v1/auth/reset-password/${resetToken}`).send({
-        password: 'newpassword123',
+        password: 'NewPassword123',
       });
 
       expect(res.status).toBe(200);
@@ -116,14 +116,14 @@ describe('Password Reset', () => {
       // Verify new password works
       const loginRes = await request(app).post('/api/v1/auth/login').send({
         email: userEmail,
-        password: 'newpassword123',
+        password: 'NewPassword123',
       });
       expect(loginRes.status).toBe(200);
     });
 
     it('should return 400 for invalid token', async () => {
       const res = await request(app).post('/api/v1/auth/reset-password/invalid-token').send({
-        password: 'newpassword123',
+        password: 'NewPassword123',
       });
 
       expect(res.status).toBe(400);
@@ -144,7 +144,7 @@ describe('Password Reset', () => {
       });
 
       const res = await request(app).post('/api/v1/auth/reset-password/expired-token').send({
-        password: 'newpassword123',
+        password: 'NewPassword123',
       });
 
       expect(res.status).toBe(400);
@@ -168,14 +168,14 @@ describe('Password Reset', () => {
     it('should not allow using same token twice', async () => {
       // First reset
       const res1 = await request(app).post(`/api/v1/auth/reset-password/${resetToken}`).send({
-        password: 'newpassword123',
+        password: 'NewPassword123',
       });
 
       expect(res1.status).toBe(200);
 
       // Try to use same token again
       const res2 = await request(app).post(`/api/v1/auth/reset-password/${resetToken}`).send({
-        password: 'anotherpassword123',
+        password: 'AnotherPassword123',
       });
 
       expect(res2.status).toBe(400);
@@ -184,12 +184,12 @@ describe('Password Reset', () => {
 
     it('should hash password correctly', async () => {
       await request(app).post(`/api/v1/auth/reset-password/${resetToken}`).send({
-        password: 'newpassword123',
+        password: 'NewPassword123',
       });
 
       const user = await prisma.user.findUnique({ where: { id: userId } });
       expect(user?.passwordHash).toBeDefined();
-      expect(user?.passwordHash).not.toBe('newpassword123'); // Should be hashed
+      expect(user?.passwordHash).not.toBe('NewPassword123'); // Should be hashed
     });
   });
 });

@@ -1,102 +1,150 @@
 import { Request, Response } from 'express';
 
 import { prisma } from '../../config/prisma';
+import { createAddressSchema, updateAddressSchema } from './address.schema';
 
 export async function getAddresses(req: Request, res: Response) {
-  const userId = req.user!.id;
-  const addresses = await prisma.address.findMany({
-    where: { userId },
-    orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
-  });
-  return res.json({ addresses });
+  try {
+    const userId = req.user!.id;
+    const addresses = await prisma.address.findMany({
+      where: { userId },
+      orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
+    });
+    return res.json({ addresses });
+  } catch (error) {
+    console.error(
+      'Error in getAddresses:',
+      error instanceof Error ? error.message : 'Unknown error',
+    );
+    return res.status(500).json({ message: 'Failed to fetch addresses' });
+  }
 }
 
 export async function createAddress(req: Request, res: Response) {
-  const userId = req.user!.id;
-  const addressData = req.body as {
-    label: string;
-    firstName: string;
-    lastName: string;
-    street: string;
-    city: string;
-    state?: string;
-    zipCode: string;
-    country?: string;
-    phone?: string;
-    isDefault?: boolean;
-  };
+  try {
+    const userId = req.user!.id;
 
-  // If this is set as default, unset other default addresses
-  if (addressData.isDefault) {
-    await prisma.address.updateMany({
-      where: { userId, isDefault: true },
-      data: { isDefault: false },
+    // Validate request body with Zod
+    const validationResult = createAddressSchema.safeParse(req.body);
+    if (!validationResult.success) {
+      return res.status(400).json({
+        message: 'Validation error',
+        errors: validationResult.error.issues,
+      });
+    }
+
+    // Use parsed/sanitized data from Zod validation
+    const addressData = validationResult.data;
+
+    // Execute all operations in a single transaction to avoid race conditions
+    const address = await prisma.$transaction(async (tx) => {
+      // If this is set as default, unset other default addresses
+      if (addressData.isDefault) {
+        await tx.address.updateMany({
+          where: { userId, isDefault: true },
+          data: { isDefault: false },
+        });
+      }
+
+      // Create the new address
+      return await tx.address.create({
+        data: {
+          ...addressData,
+          userId,
+          country: addressData.country || 'US',
+        },
+      });
     });
+
+    return res.status(201).json({ address });
+  } catch (error) {
+    console.error(
+      'Error in createAddress:',
+      error instanceof Error ? error.message : 'Unknown error',
+    );
+    return res.status(500).json({ message: 'An error occurred. Please try again later.' });
   }
-
-  const address = await prisma.address.create({
-    data: {
-      ...addressData,
-      userId,
-      country: addressData.country || 'US',
-    },
-  });
-
-  return res.status(201).json({ address });
 }
 
 export async function updateAddress(req: Request, res: Response) {
-  const userId = req.user!.id;
-  const { id } = req.params as { id: string };
-  const updateData = req.body as {
-    label?: string;
-    firstName?: string;
-    lastName?: string;
-    street?: string;
-    city?: string;
-    state?: string;
-    zipCode?: string;
-    country?: string;
-    phone?: string;
-    isDefault?: boolean;
-  };
+  try {
+    const userId = req.user!.id;
+    const { id } = req.params as { id: string };
 
-  // Check if address belongs to user
-  const existingAddress = await prisma.address.findFirst({
-    where: { id, userId },
-  });
-  if (!existingAddress) {
-    return res.status(404).json({ message: 'Address not found' });
-  }
+    // Validate request body with Zod
+    const validationResult = updateAddressSchema.safeParse(req.body);
+    if (!validationResult.success) {
+      return res.status(400).json({
+        message: 'Validation error',
+        errors: validationResult.error.issues,
+      });
+    }
 
-  // If setting as default, unset other default addresses
-  if (updateData.isDefault === true) {
-    await prisma.address.updateMany({
-      where: { userId, isDefault: true, id: { not: id } },
-      data: { isDefault: false },
+    // Use parsed/sanitized data from Zod validation
+    const updateData = validationResult.data;
+
+    // Execute all operations in a single transaction to avoid TOCTOU
+    const address = await prisma.$transaction(async (tx) => {
+      // Check if address belongs to user
+      const existingAddress = await tx.address.findUnique({
+        where: { id },
+      });
+
+      if (!existingAddress || existingAddress.userId !== userId) {
+        throw new Error('NOT_FOUND');
+      }
+
+      // If setting as default, unset other default addresses
+      if (updateData.isDefault === true) {
+        await tx.address.updateMany({
+          where: { userId, isDefault: true, id: { not: id } },
+          data: { isDefault: false },
+        });
+      }
+
+      // Update the address
+      return await tx.address.update({
+        where: { id },
+        data: updateData,
+      });
     });
+
+    return res.json({ address });
+  } catch (error: unknown) {
+    // Handle NOT_FOUND error from transaction
+    if (error instanceof Error && error.message === 'NOT_FOUND') {
+      return res.status(404).json({ message: 'Address not found' });
+    }
+
+    console.error(
+      'Error in updateAddress:',
+      error instanceof Error ? error.message : 'Unknown error',
+    );
+    return res.status(500).json({ message: 'An error occurred. Please try again later.' });
   }
-
-  const address = await prisma.address.update({
-    where: { id },
-    data: updateData,
-  });
-
-  return res.json({ address });
 }
 
 export async function deleteAddress(req: Request, res: Response) {
-  const userId = req.user!.id;
-  const { id } = req.params as { id: string };
+  try {
+    const userId = req.user!.id;
+    const { id } = req.params as { id: string };
 
-  const address = await prisma.address.findFirst({
-    where: { id, userId },
-  });
-  if (!address) {
-    return res.status(404).json({ message: 'Address not found' });
+    // Perform atomic delete with userId in where clause (only owner can delete)
+    const deleteResult = await prisma.address.deleteMany({
+      where: { id, userId },
+    });
+
+    // If no record was deleted, address doesn't exist or doesn't belong to user
+    if (deleteResult.count === 0) {
+      return res.status(404).json({ message: 'Address not found' });
+    }
+
+    return res.json({ message: 'Address deleted successfully' });
+  } catch (error) {
+    console.error(
+      'Error in deleteAddress:',
+      error instanceof Error ? error.message : 'Unknown error',
+    );
+    return res.status(500).json({ message: 'An error occurred. Please try again later.' });
   }
-
-  await prisma.address.delete({ where: { id } });
-
-  return res.json({ message: 'Address deleted successfully' });
 }

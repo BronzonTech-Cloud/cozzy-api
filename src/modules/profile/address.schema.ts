@@ -6,7 +6,7 @@ export const createAddressSchema = z.object({
   lastName: z.string().min(1).max(100),
   street: z.string().min(1).max(200),
   city: z.string().min(1).max(100),
-  state: z.string().max(100).optional(),
+  state: z.string().min(1).max(100).optional(),
   zipCode: z.string().min(1).max(20),
   country: z.string().min(2).max(2).default('US'),
   phone: z.string().max(20).optional(),

@@ -2,13 +2,15 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
-import rateLimit from 'express-rate-limit';
 import slowDown from 'express-slow-down';
 import redoc from 'redoc-express';
 
 import { errorHandler, notFoundHandler } from './middleware/error';
 import { router as apiRouter } from './routes';
 import { swaggerSpec } from './config/swagger';
+import { generalLimiter } from './middleware/rate-limit';
+import { performanceMiddleware } from './middleware/performance';
+import { env } from './config/env';
 
 export function createApp() {
   const app = express();
@@ -32,12 +34,27 @@ export function createApp() {
       },
     }),
   );
-  app.use(cors({ origin: process.env.CLIENT_URL || '*', credentials: true }));
+  // CORS configuration - require CLIENT_URL in production
+  const corsOrigin = env.CLIENT_URL || (env.NODE_ENV === 'production' ? undefined : '*');
+  if (env.NODE_ENV === 'production' && !env.CLIENT_URL) {
+    throw new Error('CLIENT_URL must be set in production environment');
+  }
+  app.use(cors({ origin: corsOrigin, credentials: true }));
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
   app.use(morgan('dev'));
+  app.use(performanceMiddleware);
 
-  const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100 });
+  // Apply general rate limiting to all API routes except auth routes
+  // Auth routes have their own specific rate limiters
+  app.use('/api/v1', (req, res, next) => {
+    // Skip general limiter for auth routes (they have their own limiters)
+    if (req.path.startsWith('/auth')) {
+      return next();
+    }
+    return generalLimiter(req, res, next);
+  });
+
   const authSlowdown = slowDown({
     windowMs: 15 * 60 * 1000,
     delayAfter: 10,
@@ -187,7 +204,7 @@ export function createApp() {
     }),
   );
 
-  app.use('/api/v1/auth', authLimiter, authSlowdown);
+  app.use('/api/v1/auth', authSlowdown);
   app.use('/api/v1', apiRouter);
 
   app.use(notFoundHandler);

@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
 
 import { prisma } from '../../config/prisma';
+import { invalidateCache } from '../../middleware/cache';
 import { CreateProductInput, UpdateProductInput } from './products.schema';
 
 function slugify(input: string) {
@@ -103,6 +104,12 @@ export async function createProduct(req: Request, res: Response) {
       categoryId,
     },
   });
+
+  // Invalidate product caches
+  invalidateCache('products:.*');
+  invalidateCache('product:.*');
+  invalidateCache('search:.*');
+
   res.status(201).json({ product });
 }
 
@@ -113,6 +120,12 @@ export async function updateProduct(req: Request, res: Response) {
   if (body.title) data.slug = slugify(body.title);
   try {
     const product = await prisma.product.update({ where: { id }, data });
+
+    // Invalidate product caches
+    invalidateCache('products:.*');
+    invalidateCache('product:.*');
+    invalidateCache('search:.*');
+
     res.json({ product });
   } catch {
     res.status(404).json({ message: 'Product not found' });
@@ -123,6 +136,12 @@ export async function deleteProduct(req: Request, res: Response) {
   const { id } = req.params as { id: string };
   try {
     await prisma.product.delete({ where: { id } });
+
+    // Invalidate product caches
+    invalidateCache('products:.*');
+    invalidateCache('product:.*');
+    invalidateCache('search:.*');
+
     res.status(204).send();
   } catch {
     res.status(404).json({ message: 'Product not found' });

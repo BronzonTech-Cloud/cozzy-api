@@ -54,7 +54,7 @@ describe('Email Verification', () => {
         .post('/api/v1/auth/verify-email')
         .set('Authorization', `Bearer ${userToken}`);
 
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(409);
       expect(res.body).toHaveProperty('message', 'Email is already verified');
     });
 
@@ -173,7 +173,7 @@ describe('Email Verification', () => {
         .post('/api/v1/auth/resend-verification')
         .set('Authorization', `Bearer ${userToken}`);
 
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(409);
       expect(res.body).toHaveProperty('message', 'Email is already verified');
     });
 

@@ -4,6 +4,8 @@ A production-ready, full-featured RESTful E-commerce API built with TypeScript, 
 
 ## ✨ Features
 
+### Core Features
+
 - 🔐 **JWT Authentication** - Secure token-based authentication with refresh tokens
 - 👥 **Role-Based Access Control** - Admin and user roles with protected routes
 - 📦 **Product Management** - Full CRUD operations with filtering, pagination, and search
@@ -11,7 +13,31 @@ A production-ready, full-featured RESTful E-commerce API built with TypeScript, 
 - 🛒 **Order Management** - Create and track orders with inventory validation
 - 💳 **Stripe Integration** - Secure payment processing with webhook support
 - 📊 **Inventory Management** - Real-time stock tracking and validation
-- 🧪 **Comprehensive Testing** - 52+ tests with 78%+ code coverage
+
+### User Features (v1.1.0)
+
+- 🛒 **Shopping Cart** - Add, update, remove items with persistence
+- ⭐ **Reviews & Ratings** - Product reviews with verified purchase badges
+- ❤️ **Wishlist** - Save favorite products for later
+- 👤 **Profile Management** - Update profile and manage addresses
+- ✉️ **Email Verification** - Secure email verification flow
+- 🔑 **Password Reset** - Forgot password functionality via email
+
+### Advanced Features (v1.1.0)
+
+- 📦 **Product Variants** - Support for size, color, and other variants
+- 🎫 **Coupon System** - Percentage and fixed amount discounts
+- 🔍 **Enhanced Search** - Advanced search with filters and autocomplete
+- 🎯 **Recommendations** - Personalized product recommendations
+- 📊 **Order Tracking** - Order status history and tracking information
+
+### Performance & Security
+
+- ⚡ **Response Caching** - Cached responses for frequently accessed data
+- 🚀 **Database Optimization** - Performance indexes for faster queries
+- 🛡️ **Rate Limiting** - Per-endpoint rate limiting for security
+- 📈 **Performance Monitoring** - Slow request logging and monitoring
+- 🧪 **Comprehensive Testing** - 237+ tests with 80%+ code coverage
 - 🚀 **CI/CD Ready** - GitHub Actions workflow included
 - 🔒 **Security First** - Rate limiting, input validation, CORS, Helmet.js
 - 📝 **Type-Safe** - Full TypeScript with Prisma ORM
@@ -701,35 +727,56 @@ cozzy/
 │   ├── middleware/      # Express middleware
 │   │   ├── auth.ts     # Authentication middleware
 │   │   ├── error.ts    # Error handling
-│   │   └── validate.ts # Request validation
+│   │   ├── validate.ts # Request validation
+│   │   ├── cache.ts    # Cache middleware
+│   │   ├── rate-limit.ts # Rate limiting
+│   │   └── performance.ts # Performance monitoring
 │   ├── modules/        # Feature modules
 │   │   ├── auth/       # Authentication
 │   │   ├── users/      # User management
 │   │   ├── categories/  # Categories
 │   │   ├── products/   # Products
 │   │   ├── orders/     # Orders
-│   │   └── payments/   # Stripe payments
+│   │   ├── payments/   # Stripe payments
+│   │   ├── cart/       # Shopping cart
+│   │   ├── reviews/    # Product reviews
+│   │   ├── wishlist/   # Wishlist
+│   │   ├── profile/    # User profile & addresses
+│   │   ├── coupons/    # Coupons
+│   │   ├── search/     # Search
+│   │   └── health/     # Health checks
 │   ├── routes/         # Route definitions
 │   ├── utils/          # Utility functions
+│   │   ├── cache.ts   # Cache implementation
+│   │   ├── email.ts   # Email service
+│   │   └── jwt.ts     # JWT utilities
 │   ├── app.ts          # Express app setup
 │   └── server.ts       # Server entry point
-├── tests/              # Test files
+├── tests/              # Test files (237+ tests)
 ├── prisma/             # Prisma schema and migrations
 ├── scripts/            # Utility scripts
 ├── .github/            # GitHub Actions workflows
+├── PERFORMANCE.md      # Performance benchmarks
+├── SECURITY_AUDIT.md   # Security audit report
+├── RELEASE_NOTES_v1.1.0.md  # Release notes
 └── README.md           # This file
 ```
 
 ## 🔒 Security
 
-- **JWT Authentication** - Secure token-based authentication
+- **JWT Authentication** - Secure token-based authentication with refresh tokens
 - **Password Hashing** - bcrypt with salt rounds
-- **Rate Limiting** - Prevents brute force attacks
-- **Input Validation** - Zod schema validation
+- **Rate Limiting** - Per-endpoint rate limiting prevents brute force attacks
+- **Email Verification** - Token-based email verification flow
+- **Password Reset** - Secure password reset with expiring tokens
+- **Input Validation** - Zod schema validation for all inputs
 - **CORS** - Configurable cross-origin resource sharing
-- **Helmet.js** - Security headers
+- **Helmet.js** - Security headers with CSP
 - **Environment Variables** - Sensitive data in `.env`
 - **SQL Injection Protection** - Prisma ORM parameterized queries
+- **Performance Monitoring** - Slow request logging and monitoring
+
+For detailed security information, see [SECURITY_AUDIT.md](./SECURITY_AUDIT.md)
 
 ## 🚀 Deployment
 
@@ -804,6 +851,21 @@ Contributions are welcome! Please follow these steps:
 - **Order status** becomes `PAID` only after Stripe webhook confirmation
 - **CORS** is configured for the `CLIENT_URL` environment variable
 - **Slugs** are auto-generated from titles using slugify
+- **Caching** is enabled for frequently accessed endpoints (products, categories, search)
+- **Rate Limiting** is per-endpoint with appropriate limits
+- **Performance Monitoring** logs slow requests (>1s)
+
+## 📊 Performance
+
+For performance benchmarks and optimization details, see [PERFORMANCE.md](./PERFORMANCE.md).
+
+## 🔒 Security
+
+For detailed security information and audit report, see [SECURITY_AUDIT.md](./SECURITY_AUDIT.md).
+
+## 📝 Release Notes
+
+For detailed release notes, see [RELEASE_NOTES_v1.1.0.md](./RELEASE_NOTES_v1.1.0.md).
 
 ## 📄 License
 

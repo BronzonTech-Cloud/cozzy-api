@@ -63,6 +63,18 @@ module.exports = [
     },
   },
   {
+    files: ['src/middleware/**/*.ts'],
+    languageOptions: {
+      globals: {
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
+        setInterval: 'readonly',
+        clearInterval: 'readonly',
+        NodeJS: 'readonly',
+      },
+    },
+  },
+  {
     files: ['tests/**/*.ts'],
     languageOptions: {
       globals: {

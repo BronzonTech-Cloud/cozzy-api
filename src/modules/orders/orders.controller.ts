@@ -32,14 +32,17 @@ export async function createOrder(req: Request, res: Response) {
 
   // Validate and apply coupon if provided
   let discountCents = 0;
-  let appliedCouponCode: string | null = null;
+  let appliedCouponId: string | null = null;
   if (couponCode) {
     const couponResult = await validateAndCalculateCoupon(couponCode, subtotalCents);
     if (!couponResult.valid) {
       return res.status(400).json({ message: couponResult.error || 'Invalid coupon' });
     }
     discountCents = couponResult.discountCents;
-    appliedCouponCode = couponCode;
+    // Get coupon ID from the result
+    if (couponResult.coupon) {
+      appliedCouponId = couponResult.coupon.id;
+    }
   }
 
   const totalCents = subtotalCents - discountCents;
@@ -53,7 +56,7 @@ export async function createOrder(req: Request, res: Response) {
         currency: currency || 'USD',
         itemsCount,
         paymentProvider: 'STRIPE',
-        couponCode: appliedCouponCode,
+        couponId: appliedCouponId,
         discountCents,
       },
     });
@@ -85,9 +88,9 @@ export async function createOrder(req: Request, res: Response) {
     }
 
     // Increment coupon usage count if coupon was applied
-    if (appliedCouponCode) {
+    if (appliedCouponId) {
       await tx.coupon.update({
-        where: { code: appliedCouponCode },
+        where: { id: appliedCouponId },
         data: { usageCount: { increment: 1 } },
       });
     }
@@ -95,7 +98,13 @@ export async function createOrder(req: Request, res: Response) {
     return order;
   });
 
-  res.status(201).json({ order: result });
+  // Fetch the order with relations for the response
+  const orderWithRelations = await prisma.order.findUnique({
+    where: { id: result.id },
+    include: { items: true, coupon: true },
+  });
+
+  res.status(201).json({ order: orderWithRelations });
 }
 
 export async function listOrders(req: Request, res: Response) {
@@ -105,14 +114,17 @@ export async function listOrders(req: Request, res: Response) {
   const orders = await prisma.order.findMany({
     where,
     orderBy: { createdAt: 'desc' },
-    include: { items: true },
+    include: { items: true, coupon: true },
   });
   res.json({ orders });
 }
 
 export async function getOrder(req: Request, res: Response) {
   const { id } = req.params as { id: string };
-  const order = await prisma.order.findUnique({ where: { id }, include: { items: true } });
+  const order = await prisma.order.findUnique({
+    where: { id },
+    include: { items: true, coupon: true },
+  });
   if (!order) return res.status(404).json({ message: 'Order not found' });
   const isAdmin = req.user!.role === 'ADMIN';
   if (!isAdmin && order.userId !== req.user!.id)

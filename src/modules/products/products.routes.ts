@@ -2,6 +2,8 @@ import { Router } from 'express';
 
 import { authGuard, requireRole } from '../../middleware/auth';
 import { validate } from '../../middleware/validate';
+import { cacheMiddleware } from '../../middleware/cache';
+import { searchLimiter } from '../../middleware/rate-limit';
 import { createProductSchema, updateProductSchema } from './products.schema';
 import {
   createProduct,
@@ -71,7 +73,11 @@ export const productsRouter = Router();
  *                     totalPages:
  *                       type: integer
  */
-productsRouter.get('/', listProducts);
+productsRouter.get(
+  '/',
+  cacheMiddleware({ ttl: 300, keyPrefix: 'products', includeQuery: true }),
+  listProducts,
+);
 
 /**
  * @swagger
@@ -152,7 +158,12 @@ productsRouter.get('/', listProducts);
  *                     totalPages: { type: integer }
  *                     hasMore: { type: boolean }
  */
-productsRouter.get('/search', searchProducts);
+productsRouter.get(
+  '/search',
+  searchLimiter,
+  cacheMiddleware({ ttl: 60, keyPrefix: 'search', includeQuery: true }),
+  searchProducts,
+);
 
 /**
  * @swagger
@@ -249,7 +260,7 @@ productsRouter.get('/:id/related', getRelatedProducts);
  *       404:
  *         $ref: '#/components/responses/NotFound'
  */
-productsRouter.get('/:slug', getProductBySlug);
+productsRouter.get('/:slug', cacheMiddleware({ ttl: 600, keyPrefix: 'product' }), getProductBySlug);
 
 /**
  * @swagger
