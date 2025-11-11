@@ -24,7 +24,10 @@ export async function forgotPassword(req: Request, res: Response) {
     // Trim and lowercase email
     const normalizedEmail = email.trim().toLowerCase();
 
-    // Basic email validation pattern
+    // Basic email validation pattern - limit input length to prevent ReDoS
+    if (normalizedEmail.length > 254) {
+      return res.status(400).json({ message: 'Invalid email format' });
+    }
     const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailPattern.test(normalizedEmail)) {
       return res.status(400).json({ message: 'Invalid email format' });
@@ -51,23 +54,7 @@ export async function forgotPassword(req: Request, res: Response) {
         .json({ message: 'Server configuration error. Please contact support.' });
     }
 
-    // Send password reset email BEFORE saving token to database
-    // This ensures the user receives the email before we commit the token
-    const resetUrl = `${env.APP_URL}/api/v1/auth/reset-password/${resetToken}`;
-    await sendEmail({
-      to: user.email,
-      subject: 'Password Reset Request',
-      html: `
-        <h2>Password Reset Request</h2>
-        <p>You requested to reset your password. Click the link below to reset it:</p>
-        <p><a href="${resetUrl}">Reset Password</a></p>
-        <p>This link will expire in 1 hour.</p>
-        <p>If you didn't request this, please ignore this email.</p>
-      `,
-      text: `Password Reset Request\n\nClick this link to reset your password: ${resetUrl}\n\nThis link will expire in 1 hour.\n\nIf you didn't request this, please ignore this email.`,
-    });
-
-    // Save token to database only after email is sent successfully
+    // Save token to database FIRST to ensure it's persisted before sending email
     await prisma.user.update({
       where: { id: user.id },
       data: {
@@ -75,6 +62,35 @@ export async function forgotPassword(req: Request, res: Response) {
         resetPasswordExpires: resetTokenExpires,
       },
     });
+
+    // Send password reset email AFTER saving token
+    // If email sending fails, clear the token to prevent unusable links
+    const resetUrl = `${env.APP_URL}/api/v1/auth/reset-password/${resetToken}`;
+    try {
+      await sendEmail({
+        to: user.email,
+        subject: 'Password Reset Request',
+        html: `
+          <h2>Password Reset Request</h2>
+          <p>You requested to reset your password. Click the link below to reset it:</p>
+          <p><a href="${resetUrl}">Reset Password</a></p>
+          <p>This link will expire in 1 hour.</p>
+          <p>If you didn't request this, please ignore this email.</p>
+        `,
+        text: `Password Reset Request\n\nClick this link to reset your password: ${resetUrl}\n\nThis link will expire in 1 hour.\n\nIf you didn't request this, please ignore this email.`,
+      });
+    } catch (emailError) {
+      // If email sending fails, clear the token to prevent unusable links
+      await prisma.user.update({
+        where: { id: user.id, resetPasswordToken: resetToken },
+        data: {
+          resetPasswordToken: null,
+          resetPasswordExpires: null,
+        },
+      });
+      console.error('Failed to send password reset email:', emailError);
+      throw emailError; // Re-throw to trigger error handler
+    }
 
     return res.json({
       message: 'If an account with that email exists, a password reset link has been sent.',
@@ -117,7 +133,8 @@ export async function resetPassword(req: Request, res: Response) {
     const hasUpperCase = /[A-Z]/.test(passwordValue);
     const hasLowerCase = /[a-z]/.test(passwordValue);
     const hasNumbers = /\d/.test(passwordValue);
-    const hasSpecialChar = /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(passwordValue);
+    // Use a safer regex pattern to avoid ReDoS - check for non-alphanumeric characters
+    const hasSpecialChar = /[^a-zA-Z0-9]/.test(passwordValue);
 
     // Require at least 3 of 4 complexity requirements
     const complexityCount = [hasUpperCase, hasLowerCase, hasNumbers, hasSpecialChar].filter(

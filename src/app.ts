@@ -15,6 +15,12 @@ import { env } from './config/env';
 export function createApp() {
   const app = express();
 
+  // Trust proxy for accurate IP detection in production/CI
+  // In test environment, this helps rate limiting work correctly
+  if (env.NODE_ENV === 'production' || env.NODE_ENV === 'test') {
+    app.set('trust proxy', true);
+  }
+
   // Configure Helmet with CSP that allows ReDoc
   app.use(
     helmet({
@@ -35,9 +41,16 @@ export function createApp() {
     }),
   );
   // CORS configuration - require CLIENT_URL in production
-  const corsOrigin = env.CLIENT_URL || (env.NODE_ENV === 'production' ? undefined : '*');
-  if (env.NODE_ENV === 'production' && !env.CLIENT_URL) {
-    throw new Error('CLIENT_URL must be set in production environment');
+  let corsOrigin: string | string[] | undefined;
+  if (env.NODE_ENV === 'production') {
+    if (!env.CLIENT_URL) {
+      throw new Error('CLIENT_URL must be set in production environment');
+    }
+    // In production, use explicit origin(s) - support multiple origins if comma-separated
+    corsOrigin = env.CLIENT_URL.split(',').map((url) => url.trim());
+  } else {
+    // Development: allow all origins for easier local development
+    corsOrigin = '*';
   }
   app.use(cors({ origin: corsOrigin, credentials: true }));
   app.use(express.json());

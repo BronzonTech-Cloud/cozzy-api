@@ -80,8 +80,15 @@ export async function updateAddress(req: Request, res: Response) {
       });
     }
 
-    // Use parsed/sanitized data from Zod validation
-    const updateData = validationResult.data;
+    // Filter out undefined values to avoid overwriting with defaults
+    // Only include fields that were actually provided in req.body
+    const updateData: Record<string, unknown> = {};
+    const bodyKeys = Object.keys(req.body);
+    for (const key of bodyKeys) {
+      if (key in validationResult.data && validationResult.data[key as keyof typeof validationResult.data] !== undefined) {
+        updateData[key] = validationResult.data[key as keyof typeof validationResult.data];
+      }
+    }
 
     // Execute all operations in a single transaction to avoid TOCTOU
     const address = await prisma.$transaction(async (tx) => {
@@ -102,10 +109,10 @@ export async function updateAddress(req: Request, res: Response) {
         });
       }
 
-      // Update the address
+      // Update the address - cast updateData to Prisma's expected type
       return await tx.address.update({
         where: { id },
-        data: updateData,
+        data: updateData as Parameters<typeof tx.address.update>[0]['data'],
       });
     });
 

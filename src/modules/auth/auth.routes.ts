@@ -192,7 +192,7 @@ authRouter.get('/me', authGuard, me);
  *       404:
  *         $ref: '#/components/responses/NotFound'
  */
-authRouter.post('/verify-email', authGuard, emailVerificationLimiter, requestVerificationEmail);
+authRouter.post('/verify-email', emailVerificationLimiter, authGuard, requestVerificationEmail);
 
 /**
  * @swagger
@@ -247,8 +247,8 @@ authRouter.get('/verify-email/:token', emailVerificationLimiter, verifyEmail);
  */
 authRouter.post(
   '/resend-verification',
-  authGuard,
   emailVerificationLimiter,
+  authGuard,
   resendVerificationEmail,
 );
 

@@ -5,10 +5,10 @@ import { validateAndCalculateCoupon } from '../coupons/coupon-utils';
 
 export async function createOrder(req: Request, res: Response) {
   const userId = req.user!.id;
-  const { items, currency, couponCode } = req.body as {
+  const { items, currency, couponId } = req.body as {
     items: { productId: string; quantity: number }[];
     currency?: string;
-    couponCode?: string;
+    couponId?: string;
   };
 
   const productIds = items.map((i) => i.productId);
@@ -33,16 +33,19 @@ export async function createOrder(req: Request, res: Response) {
   // Validate and apply coupon if provided
   let discountCents = 0;
   let appliedCouponId: string | null = null;
-  if (couponCode) {
-    const couponResult = await validateAndCalculateCoupon(couponCode, subtotalCents);
+  if (couponId) {
+    // Look up coupon by ID first
+    const coupon = await prisma.coupon.findUnique({ where: { id: couponId } });
+    if (!coupon) {
+      return res.status(400).json({ message: 'Coupon not found' });
+    }
+    // Validate and calculate using the coupon code
+    const couponResult = await validateAndCalculateCoupon(coupon.code, subtotalCents);
     if (!couponResult.valid) {
       return res.status(400).json({ message: couponResult.error || 'Invalid coupon' });
     }
     discountCents = couponResult.discountCents;
-    // Get coupon ID from the result
-    if (couponResult.coupon) {
-      appliedCouponId = couponResult.coupon.id;
-    }
+    appliedCouponId = coupon.id;
   }
 
   const totalCents = subtotalCents - discountCents;

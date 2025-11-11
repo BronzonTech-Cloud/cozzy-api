@@ -52,7 +52,10 @@ export async function updateProfile(req: Request, res: Response) {
     if (trimmedEmail.length === 0) {
       return res.status(400).json({ message: 'Email cannot be empty' });
     }
-    // Simple RFC-lite email validation regex
+    // Simple RFC-lite email validation regex - limit input length to prevent ReDoS
+    if (trimmedEmail.length > 254) {
+      return res.status(400).json({ message: 'Invalid email format' });
+    }
     const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailPattern.test(trimmedEmail)) {
       return res.status(400).json({ message: 'Invalid email format' });

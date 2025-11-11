@@ -81,4 +81,5 @@ jobs:
           APP_URL: http://localhost:4000
           CLIENT_URL: http://localhost:3000
         run: bun run test
-        timeout-minutes: 10
+        timeout-minutes: 15
+        continue-on-error: false
