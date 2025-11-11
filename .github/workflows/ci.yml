@@ -55,6 +55,7 @@ jobs:
 
       - name: Prepare test database
         env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/cozzy_test_db
           DATABASE_URL_TEST: postgresql://postgres:postgres@localhost:5432/cozzy_test_db
           NODE_ENV: test
           # Minimal env vars for migration (JWT secrets not needed for migrations)
@@ -62,6 +63,7 @@ jobs:
           JWT_REFRESH_SECRET: test_refresh_secret_key_min_32_chars
         run: |
           # Reset database to ensure clean state before tests
+          # DATABASE_URL is set in env above for Prisma commands
           bunx prisma migrate reset --force --skip-seed || bunx prisma db push --accept-data-loss --skip-generate
           bun run test:db:prepare
 
