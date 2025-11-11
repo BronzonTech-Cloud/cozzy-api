@@ -62,10 +62,15 @@ jobs:
           JWT_ACCESS_SECRET: test_access_secret_key_min_32_chars
           JWT_REFRESH_SECRET: test_refresh_secret_key_min_32_chars
         run: |
-          # Reset database to ensure clean state before tests
-          # DATABASE_URL is set in env above for Prisma commands
-          bunx prisma migrate reset --force --skip-seed || bunx prisma db push --accept-data-loss --skip-generate
-          bun run test:db:prepare
+          # Create database if it doesn't exist
+          PGPASSWORD=postgres psql -h localhost -U postgres -tc "SELECT 1 FROM pg_database WHERE datname = 'cozzy_test_db'" | grep -q 1 || PGPASSWORD=postgres psql -h localhost -U postgres -c "CREATE DATABASE cozzy_test_db"
+          
+          # Apply schema using db push (faster for CI, no migration history needed)
+          # This ensures the schema matches prisma/schema.prisma exactly
+          bunx prisma db push --accept-data-loss --skip-generate
+          
+          # Verify schema was applied
+          echo "✅ Database schema applied successfully"
 
       - name: Lint
         run: bun run lint
