@@ -21,8 +21,11 @@ export async function createTestUserAndLogin(
     throw new Error(`Failed to create test user: ${email}`);
   }
 
+  // Additional delay to ensure user is visible (createTestUser already verified, but double-check)
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  
   // Retry logic to ensure user is visible in database (handles CI transaction/visibility issues)
-  // Increased retries and delays for better reliability in CI
+  // Use raw query to bypass Prisma's connection pool caching
   let verifyUser = null;
   const maxRetries = 10;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -31,12 +34,13 @@ export async function createTestUserAndLogin(
       await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
     }
     
-    verifyUser = await prisma.user.findUnique({
-      where: { email },
-      select: { id: true, email: true, passwordHash: true },
-    });
+    // Use raw query to bypass connection pool and ensure we see the committed record
+    const result = await prisma.$queryRaw<Array<{ id: string; email: string; passwordHash: string }>>`
+      SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
+    `;
     
-    if (verifyUser) {
+    if (result && result.length > 0) {
+      verifyUser = result[0];
       break;
     }
   }
@@ -67,11 +71,11 @@ export async function createTestUserAndLogin(
 
   // Verify login succeeded
   if (!loginRes || loginRes.status !== 200) {
-    // Additional debugging: check if user exists and verify password hash
-    const debugUser = await prisma.user.findUnique({
-      where: { email },
-      select: { id: true, email: true, passwordHash: true },
-    });
+    // Additional debugging: check if user exists using raw query
+    const debugResult = await prisma.$queryRaw<Array<{ id: string; email: string }>>`
+      SELECT id, email FROM "User" WHERE email = ${email} LIMIT 1
+    `;
+    const debugUser = debugResult && debugResult.length > 0 ? debugResult[0] : null;
     throw new Error(
       `Login failed for ${email}: ${loginRes?.status || 'no response'} - ${JSON.stringify(loginRes?.body || {})}. User exists: ${!!debugUser}, User ID: ${user.id}`,
     );
@@ -93,39 +97,58 @@ export async function createTestUser(email: string, role: 'USER' | 'ADMIN' = 'US
   const passwordHash = await bcrypt.hash('password123', 10);
   
   try {
-    // Use a transaction to ensure the user is committed and visible immediately
-    // Using isolation level 'Read Committed' (default) ensures immediate visibility
-    const user = await prisma.$transaction(
-      async (tx) => {
-        return await tx.user.upsert({
-          where: { email },
-          update: {
-            // Update role and password in case user already exists with different values
-            role,
-            passwordHash,
-            name: 'Test User',
-          },
-          create: {
-            email,
-            name: 'Test User',
-            passwordHash,
-            role,
-          },
-        });
+    // Direct upsert (no transaction wrapper) - upsert is already atomic
+    // Transaction wrappers can cause visibility issues across connection pools in CI
+    const user = await prisma.user.upsert({
+      where: { email },
+      update: {
+        // Update role and password in case user already exists with different values
+        role,
+        passwordHash,
+        name: 'Test User',
       },
-      {
-        isolationLevel: 'ReadCommitted', // Explicitly set for immediate visibility
+      create: {
+        email,
+        name: 'Test User',
+        passwordHash,
+        role,
       },
-    );
+    });
     
     // Verify user was created/updated
     if (!user || !user.id) {
       throw new Error(`Failed to create/update user with email ${email}`);
     }
     
-    // Small delay to ensure transaction is committed and visible across connections
-    // Increased delay for better reliability in CI
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Force connection refresh using raw SQL (bypasses Prisma connection pool caching)
+    // This ensures the record is visible to subsequent queries
+    await prisma.$executeRaw`SELECT 1`;
+    
+    // Delay to ensure commit is visible across all connections
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    
+    // Verify user is visible using raw query (bypasses Prisma's connection pool)
+    let verifyUser = null;
+    const maxRetries = 10;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      if (attempt > 0) {
+        await new Promise((resolve) => setTimeout(resolve, 100 * attempt)); // Exponential backoff
+      }
+      
+      // Use raw query to bypass connection pool and ensure we see the committed record
+      const result = await prisma.$queryRaw<Array<{ id: string; email: string }>>`
+        SELECT id, email FROM "User" WHERE email = ${email} LIMIT 1
+      `;
+      
+      if (result && result.length > 0) {
+        verifyUser = result[0];
+        break;
+      }
+    }
+    
+    if (!verifyUser) {
+      throw new Error(`User ${email} was created but not found in database after ${maxRetries} retries`);
+    }
     
     return user;
   } catch (error) {
@@ -144,49 +167,48 @@ export async function createTestCategory(name: string, slug?: string) {
   // 2. cleanupDatabase() already handles proper deletion order
   // 3. Upsert is atomic and doesn't violate foreign key constraints
   try {
-    // Use a transaction to ensure the category is committed and visible immediately
-    // Using isolation level 'Read Committed' (default) ensures immediate visibility
-    const category = await prisma.$transaction(
-      async (tx) => {
-        return await tx.category.upsert({
-          where: { slug: categorySlug },
-          update: {
-            // Update name in case slug matches but name is different
-            name,
-          },
-          create: {
-            name,
-            slug: categorySlug,
-          },
-        });
+    // Direct upsert (no transaction wrapper) - upsert is already atomic
+    // Transaction wrappers can cause visibility issues across connection pools in CI
+    const category = await prisma.category.upsert({
+      where: { slug: categorySlug },
+      update: {
+        // Update name in case slug matches but name is different
+        name,
       },
-      {
-        isolationLevel: 'ReadCommitted', // Explicitly set for immediate visibility
+      create: {
+        name,
+        slug: categorySlug,
       },
-    );
+    });
     
     // Verify category was created/updated
     if (!category || !category.id) {
       throw new Error(`Failed to create/update category with slug ${categorySlug}`);
     }
     
-    // Small delay to ensure transaction is committed and visible across connections
-    // Increased delay for better reliability in CI
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Force connection refresh using raw SQL (bypasses Prisma connection pool caching)
+    // This ensures the record is visible to subsequent queries
+    await prisma.$executeRaw`SELECT 1`;
+    
+    // Delay to ensure commit is visible across all connections
+    await new Promise((resolve) => setTimeout(resolve, 150));
     
     // Retry logic to ensure category is visible in database (handles CI transaction/visibility issues)
+    // Use raw query to bypass connection pool and ensure we see the committed record
     let verifyCategory = null;
-    const maxRetries = 5;
+    const maxRetries = 10;
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       if (attempt > 0) {
-        await new Promise((resolve) => setTimeout(resolve, 50 * attempt)); // Exponential backoff: 50ms, 100ms, 150ms, 200ms
+        await new Promise((resolve) => setTimeout(resolve, 100 * attempt)); // Exponential backoff
       }
       
-      verifyCategory = await prisma.category.findUnique({
-        where: { id: category.id },
-      });
+      // Use raw query to bypass Prisma's connection pool caching
+      const result = await prisma.$queryRaw<Array<{ id: string; name: string; slug: string }>>`
+        SELECT id, name, slug FROM "Category" WHERE id = ${category.id} LIMIT 1
+      `;
       
-      if (verifyCategory) {
+      if (result && result.length > 0) {
+        verifyCategory = result[0];
         break;
       }
     }
@@ -214,18 +236,21 @@ export async function createTestProduct(
 ) {
   // Validate category exists before creating product
   // Retry logic with exponential backoff to handle potential timing issues in CI
+  // Use raw query to bypass Prisma's connection pool caching
   let category = null;
-  const maxRetries = 5;
+  const maxRetries = 10;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     if (attempt > 0) {
-      await new Promise((resolve) => setTimeout(resolve, 50 * attempt)); // Exponential backoff: 50ms, 100ms, 150ms, 200ms
+      await new Promise((resolve) => setTimeout(resolve, 100 * attempt)); // Exponential backoff
     }
     
-    category = await prisma.category.findUnique({
-      where: { id: categoryId },
-    });
+    // Use raw query to bypass connection pool and ensure we see the committed record
+    const result = await prisma.$queryRaw<Array<{ id: string; name: string; slug: string }>>`
+      SELECT id, name, slug FROM "Category" WHERE id = ${categoryId} LIMIT 1
+    `;
     
-    if (category) {
+    if (result && result.length > 0) {
+      category = result[0];
       break;
     }
   }
@@ -267,6 +292,69 @@ async function waitForCleanup(): Promise<void> {
   return new Promise<void>((resolve) => {
     cleanupQueue.push(resolve);
   });
+}
+
+/**
+ * Safely executes a delete operation, only suppressing "table does not exist" errors.
+ * All other errors are logged as warnings so they can be investigated.
+ *
+ * @param tableName - Name of the table being deleted (for logging)
+ * @param deleteFn - Function that performs the delete operation
+ */
+async function safeDelete(
+  tableName: string,
+  deleteFn: () => Promise<unknown>,
+): Promise<void> {
+  try {
+    await deleteFn();
+  } catch (error: unknown) {
+    // Check if this is a "table does not exist" error (expected in some scenarios)
+    const isTableMissingError =
+      (typeof error === 'object' &&
+        error !== null &&
+        'message' in error &&
+        typeof error.message === 'string' &&
+        (error.message.includes('does not exist') ||
+          error.message.includes('relation') ||
+          error.message.includes('table') ||
+          error.message.includes('not found'))) ||
+      (typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        (error.code === 'P2021' || // Prisma: Table does not exist
+          error.code === '42P01')); // PostgreSQL: relation does not exist
+
+    if (isTableMissingError) {
+      // Table doesn't exist - this is expected and can be safely ignored
+      return;
+    }
+
+    // For all other errors, log a warning so they can be investigated
+    // This includes connection errors, permission errors, constraint violations, etc.
+    const errorMessage =
+      error instanceof Error
+        ? error.message
+        : typeof error === 'object' && error !== null && 'message' in error
+          ? String(error.message)
+          : String(error);
+
+    const errorCode =
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      typeof error.code === 'string'
+        ? error.code
+        : 'UNKNOWN';
+
+    console.warn(
+      `⚠️  Failed to delete from table "${tableName}": [${errorCode}] ${errorMessage}`,
+    );
+
+    // Optionally rethrow if you want to fail fast on unexpected errors
+    // For now, we log and continue to allow cleanup to proceed with other tables
+    // Uncomment the line below if you want cleanup to fail on unexpected errors:
+    // throw error;
+  }
 }
 
 export async function cleanupDatabase() {
@@ -353,72 +441,23 @@ export async function cleanupDatabase() {
     console.warn('TRUNCATE failed, falling back to deleteMany:', error);
     
     // Fallback: delete in dependency order
-    // Use individual try/catch to ensure we continue even if one fails
-    try {
-      await prisma.review.deleteMany();
-    } catch {
-      // Ignore errors in fallback
-    }
-    try {
-      await prisma.wishlist.deleteMany();
-    } catch {
-      // Ignore errors in fallback
-    }
-    try {
-      await prisma.address.deleteMany();
-    } catch {
-      // Ignore errors in fallback
-    }
-    try {
-      await prisma.productVariant.deleteMany();
-    } catch {
-      // Ignore errors in fallback
-    }
-    try {
-      await prisma.cartItem.deleteMany();
-    } catch {
-      // Ignore errors in fallback
-    }
-    try {
-      await prisma.cart.deleteMany();
-    } catch {
-      // Ignore errors in fallback
-    }
-    try {
-      await prisma.orderStatusHistory.deleteMany();
-    } catch {
-      // Ignore errors in fallback
-    }
-    try {
-      await prisma.orderItem.deleteMany();
-    } catch {
-      // Ignore errors in fallback
-    }
-    try {
-      await prisma.order.deleteMany();
-    } catch {
-      // Ignore errors in fallback
-    }
-    try {
-      await prisma.coupon.deleteMany();
-    } catch {
-      // Ignore errors in fallback
-    }
-    try {
-      await prisma.product.deleteMany();
-    } catch {
-      // Ignore errors in fallback
-    }
-    try {
-      await prisma.category.deleteMany();
-    } catch {
-      // Ignore errors in fallback
-    }
-    try {
-      await prisma.user.deleteMany();
-    } catch {
-      // Ignore errors in fallback
-    }
+    // Use safeDelete helper to only suppress expected "table does not exist" errors
+    // All other errors (connection, permission, constraint violations) will be logged
+    await safeDelete('review', () => prisma.review.deleteMany());
+    await safeDelete('wishlist', () => prisma.wishlist.deleteMany());
+    await safeDelete('address', () => prisma.address.deleteMany());
+    await safeDelete('productVariant', () => prisma.productVariant.deleteMany());
+    await safeDelete('cartItem', () => prisma.cartItem.deleteMany());
+    await safeDelete('cart', () => prisma.cart.deleteMany());
+    await safeDelete('orderStatusHistory', () =>
+      prisma.orderStatusHistory.deleteMany(),
+    );
+    await safeDelete('orderItem', () => prisma.orderItem.deleteMany());
+    await safeDelete('order', () => prisma.order.deleteMany());
+    await safeDelete('coupon', () => prisma.coupon.deleteMany());
+    await safeDelete('product', () => prisma.product.deleteMany());
+    await safeDelete('category', () => prisma.category.deleteMany());
+    await safeDelete('user', () => prisma.user.deleteMany());
     
     // Delay after fallback cleanup to ensure deletes are visible
     await new Promise((resolve) => setTimeout(resolve, 100));
