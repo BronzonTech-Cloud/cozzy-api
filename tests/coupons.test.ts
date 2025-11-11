@@ -2,7 +2,7 @@ import request from 'supertest';
 
 import { createApp } from '../src/app';
 import { prisma } from '../src/config/prisma';
-import { createTestUser, cleanupDatabase } from './helpers';
+import { createTestUser, cleanupDatabase, createTestUserAndLogin } from './helpers';
 
 const app = createApp();
 
@@ -12,20 +12,18 @@ describe('Coupons', () => {
 
   beforeEach(async () => {
     await cleanupDatabase();
-    await createTestUser('admin@example.com', 'ADMIN');
-    await createTestUser('user@example.com', 'USER');
+    
+    // Create users and get tokens, ensuring login succeeds
+    const adminResult = await createTestUserAndLogin(app, 'admin@example.com', 'ADMIN');
+    adminToken = adminResult.token;
 
-    const adminLogin = await request(app).post('/api/v1/auth/login').send({
-      email: 'admin@example.com',
-      password: 'password123',
-    });
-    adminToken = adminLogin.body.accessToken;
+    const userResult = await createTestUserAndLogin(app, 'user@example.com', 'USER');
+    userToken = userResult.token;
 
-    const userLogin = await request(app).post('/api/v1/auth/login').send({
-      email: 'user@example.com',
-      password: 'password123',
-    });
-    userToken = userLogin.body.accessToken;
+    // Verify tokens are set
+    if (!adminToken || !userToken) {
+      throw new Error('Failed to obtain authentication tokens in test setup');
+    }
   });
 
   describe('POST /api/v1/coupons', () => {

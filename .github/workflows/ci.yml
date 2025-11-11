@@ -55,15 +55,19 @@ jobs:
 
       - name: Prepare test database
         env:
+          # PostgreSQL password is set in the service definition above (POSTGRES_PASSWORD: postgres)
+          # Using 'postgres' as default for CI test database (not a production secret)
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/cozzy_test_db
           DATABASE_URL_TEST: postgresql://postgres:postgres@localhost:5432/cozzy_test_db
+          POSTGRES_PASSWORD: postgres
           NODE_ENV: test
           # Minimal env vars for migration (JWT secrets not needed for migrations)
           JWT_ACCESS_SECRET: test_access_secret_key_min_32_chars
           JWT_REFRESH_SECRET: test_refresh_secret_key_min_32_chars
         run: |
           # Create database if it doesn't exist
-          PGPASSWORD=postgres psql -h localhost -U postgres -tc "SELECT 1 FROM pg_database WHERE datname = 'cozzy_test_db'" | grep -q 1 || PGPASSWORD=postgres psql -h localhost -U postgres -c "CREATE DATABASE cozzy_test_db"
+          # Note: Using 'postgres' password from service definition (CI test DB only, not production)
+          PGPASSWORD="$POSTGRES_PASSWORD" psql -h localhost -U postgres -tc "SELECT 1 FROM pg_database WHERE datname = 'cozzy_test_db'" | grep -q 1 || PGPASSWORD="$POSTGRES_PASSWORD" psql -h localhost -U postgres -c "CREATE DATABASE cozzy_test_db"
           
           # Apply schema using db push (faster for CI, no migration history needed)
           # This ensures the schema matches prisma/schema.prisma exactly
@@ -80,6 +84,7 @@ jobs:
 
       - name: Run tests with coverage
         env:
+          # PostgreSQL password is set in the service definition above (POSTGRES_PASSWORD: postgres)
           DATABASE_URL_TEST: postgresql://postgres:postgres@localhost:5432/cozzy_test_db
           NODE_ENV: test
           JWT_ACCESS_SECRET: test_access_secret_key_min_32_chars

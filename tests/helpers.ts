@@ -1,6 +1,47 @@
 import bcrypt from 'bcryptjs';
+import request from 'supertest';
 
 import { prisma } from '../src/config/prisma';
+
+/**
+ * Helper to create a test user and get their auth token
+ * Ensures user exists and login succeeds before returning token
+ */
+export async function createTestUserAndLogin(
+  app: ReturnType<typeof request>,
+  email: string,
+  role: 'USER' | 'ADMIN' = 'USER',
+): Promise<{ user: Awaited<ReturnType<typeof createTestUser>>; token: string }> {
+  // Create user first
+  const user = await createTestUser(email, role);
+
+  // Verify user was created
+  if (!user || !user.id) {
+    throw new Error(`Failed to create test user: ${email}`);
+  }
+
+  // Login to get token
+  const loginRes = await request(app).post('/api/v1/auth/login').send({
+    email,
+    password: 'password123',
+  });
+
+  // Verify login succeeded
+  if (loginRes.status !== 200) {
+    throw new Error(
+      `Login failed for ${email}: ${loginRes.status} - ${JSON.stringify(loginRes.body)}`,
+    );
+  }
+
+  if (!loginRes.body.accessToken) {
+    throw new Error(`No access token in login response for ${email}`);
+  }
+
+  return {
+    user,
+    token: loginRes.body.accessToken,
+  };
+}
 
 export async function createTestUser(email: string, role: 'USER' | 'ADMIN' = 'USER') {
   // Use upsert to atomically create or update user, avoiding unique constraint violations
