@@ -27,26 +27,18 @@ export async function createTestCategory(name: string, slug?: string) {
   const categorySlug = slug || name.toLowerCase();
   
   // Categories have unique constraints on both name and slug
-  // First, try to delete any existing category with matching name or slug to avoid conflicts
-  // This handles edge cases where a category exists with same name but different slug (or vice versa)
-  try {
-    await prisma.category.deleteMany({
-      where: {
-        OR: [
-          { name },
-          { slug: categorySlug },
-        ],
-      },
-    });
-  } catch (error) {
-    // Log and rethrow real errors - don't silently swallow DB failures
-    console.error(`Failed to delete existing category with name ${name} or slug ${categorySlug}:`, error);
-    throw error;
-  }
-
-  // Now create the category - safe since we've cleared any conflicts
-  return prisma.category.create({
-    data: {
+  // Use upsert to atomically create or update category, avoiding unique constraint violations
+  // This is safer than delete-then-create because:
+  // 1. Categories may have products referencing them (foreign key constraint)
+  // 2. cleanupDatabase() already handles proper deletion order
+  // 3. Upsert is atomic and doesn't violate foreign key constraints
+  return prisma.category.upsert({
+    where: { slug: categorySlug },
+    update: {
+      // Update name in case slug matches but name is different
+      name,
+    },
+    create: {
       name,
       slug: categorySlug,
     },

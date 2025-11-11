@@ -51,9 +51,15 @@ describe('Product Recommendations', () => {
   describe('GET /api/v1/products/recommendations', () => {
     it('should get personalized recommendations based on purchase history', async () => {
       // Create an order with product from category1
+      // Ensure user exists before creating order to avoid foreign key violations
+      const user = await prisma.user.findUnique({ where: { email: 'user@example.com' } });
+      if (!user) {
+        throw new Error('Test user not found. Ensure beforeEach creates the user.');
+      }
+
       const order = await prisma.order.create({
         data: {
-          userId: (await prisma.user.findUnique({ where: { email: 'user@example.com' } }))!.id,
+          userId: user.id,
           status: 'PAID',
           totalCents: 100000,
           currency: 'USD',

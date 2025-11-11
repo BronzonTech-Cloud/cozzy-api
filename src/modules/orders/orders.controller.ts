@@ -3,6 +3,22 @@ import { Request, Response } from 'express';
 import { prisma } from '../../config/prisma';
 import { validateAndCalculateCoupon } from '../coupons/coupon-utils';
 
+// Customer-relevant coupon fields to include in order responses
+// Excludes sensitive/internal fields like usageCount, usageLimit, maxDiscount
+const COUPON_SELECT_FIELDS = {
+  select: {
+    id: true,
+    code: true,
+    description: true,
+    discountType: true,
+    discountValue: true,
+    minPurchase: true,
+    validFrom: true,
+    validUntil: true,
+    active: true,
+  },
+} as const;
+
 export async function createOrder(req: Request, res: Response) {
   const userId = req.user!.id;
   const { items, currency, couponId } = req.body as {
@@ -110,19 +126,7 @@ export async function createOrder(req: Request, res: Response) {
       where: { id: result.id },
       include: {
         items: true,
-        coupon: {
-          select: {
-            id: true,
-            code: true,
-            description: true,
-            discountType: true,
-            discountValue: true,
-            minPurchase: true,
-            validFrom: true,
-            validUntil: true,
-            active: true,
-          },
-        },
+        coupon: COUPON_SELECT_FIELDS,
       },
     });
 
@@ -153,19 +157,7 @@ export async function listOrders(req: Request, res: Response) {
     orderBy: { createdAt: 'desc' },
     include: {
       items: true,
-      coupon: {
-        select: {
-          id: true,
-          code: true,
-          description: true,
-          discountType: true,
-          discountValue: true,
-          minPurchase: true,
-          validFrom: true,
-          validUntil: true,
-          active: true,
-        },
-      },
+      coupon: COUPON_SELECT_FIELDS,
     },
   });
   res.json({ orders });
@@ -177,19 +169,7 @@ export async function getOrder(req: Request, res: Response) {
     where: { id },
     include: {
       items: true,
-      coupon: {
-        select: {
-          id: true,
-          code: true,
-          description: true,
-          discountType: true,
-          discountValue: true,
-          minPurchase: true,
-          validFrom: true,
-          validUntil: true,
-          active: true,
-        },
-      },
+      coupon: COUPON_SELECT_FIELDS,
     },
   });
   if (!order) return res.status(404).json({ message: 'Order not found' });

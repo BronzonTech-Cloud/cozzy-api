@@ -90,10 +90,15 @@ describe('Reviews', () => {
 
     it('should mark review as verified if user purchased product', async () => {
       // Create an order for the user with this product
+      // Ensure user exists before creating order to avoid foreign key violations
       const user = await prisma.user.findUnique({ where: { email: 'user@example.com' } });
+      if (!user) {
+        throw new Error('Test user not found. Ensure beforeEach creates the user.');
+      }
+
       const order = await prisma.order.create({
         data: {
-          userId: user!.id,
+          userId: user.id,
           status: 'PAID',
           totalCents: 1000,
           currency: 'USD',
