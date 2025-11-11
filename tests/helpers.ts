@@ -3,6 +3,9 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '../src/config/prisma';
 
 export async function createTestUser(email: string, role: 'USER' | 'ADMIN' = 'USER') {
+  // First, try to delete any existing user with this email to avoid conflicts
+  await prisma.user.deleteMany({ where: { email } }).catch(() => {});
+  
   const passwordHash = await bcrypt.hash('password123', 10);
   return prisma.user.create({
     data: {
@@ -48,7 +51,10 @@ export async function createTestProduct(
 
 export async function cleanupDatabase() {
   // Delete in order respecting foreign key constraints
-  // Use sequential awaits to ensure proper order
+  // Use individual awaits to ensure each deletion completes before the next
+  // This is more reliable than a transaction in CI environments
+  
+  // Delete child records first (those with foreign keys)
   await prisma.review.deleteMany();
   await prisma.wishlist.deleteMany();
   await prisma.address.deleteMany();
@@ -61,7 +67,15 @@ export async function cleanupDatabase() {
   await prisma.coupon.deleteMany();
   await prisma.product.deleteMany();
   await prisma.category.deleteMany();
+  // Delete users last (they are referenced by many tables)
   await prisma.user.deleteMany();
+  
+  // Verify cleanup completed by checking user count
+  const userCount = await prisma.user.count();
+  if (userCount > 0) {
+    // Force delete all users if any remain
+    await prisma.user.deleteMany();
+  }
 }
 
 export async function setupTestDatabase() {

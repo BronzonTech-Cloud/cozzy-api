@@ -63,48 +63,77 @@ export async function updateProfile(req: Request, res: Response) {
     validatedEmail = trimmedEmail;
   }
 
-  // Get current user to check if email is actually changing
-  const currentUser = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { email: true },
-  });
-  if (!currentUser) {
-    return res.status(404).json({ message: 'User not found' });
-  }
-
-  // Build update data with validated values (never write undefined)
-  const updateData: { name?: string; email?: string; emailVerified?: boolean } = {};
-
-  // Add validated name if provided
-  if (validatedName !== undefined) {
-    updateData.name = validatedName;
-  }
-
-  // Handle email update - only reset verification if email is actually changing
-  if (validatedEmail !== undefined) {
-    // Only reset verification if email is actually changing
-    if (validatedEmail !== currentUser.email) {
-      updateData.email = validatedEmail;
-      updateData.emailVerified = false;
-    }
-    // If email is the same, don't include it in updateData to avoid unnecessary update
-  }
-
+  // Use a transaction to atomically fetch and update to prevent TOCTOU race condition
   try {
-    const user = await prisma.user.update({
-      where: { id: userId },
-      data: updateData,
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        role: true,
-        emailVerified: true,
-        updatedAt: true,
-      },
+    const user = await prisma.$transaction(async (tx) => {
+      // Fetch current user within transaction for atomic comparison
+      const currentUser = await tx.user.findUnique({
+        where: { id: userId },
+        select: { email: true, name: true },
+      });
+      if (!currentUser) {
+        throw new Error('NOT_FOUND');
+      }
+
+      // Build update data with validated values (never write undefined)
+      const updateData: { name?: string; email?: string; emailVerified?: boolean } = {};
+
+      // Add validated name if provided
+      if (validatedName !== undefined) {
+        updateData.name = validatedName;
+      }
+
+      // Handle email update - only reset verification if email is actually changing
+      if (validatedEmail !== undefined) {
+        // Only update email if it's actually changing (atomic comparison within transaction)
+        if (validatedEmail !== currentUser.email) {
+          updateData.email = validatedEmail;
+          updateData.emailVerified = false;
+        }
+        // If email is the same, don't include it in updateData to avoid unnecessary update
+      }
+
+      // Check if updateData is empty before calling Prisma
+      if (Object.keys(updateData).length === 0) {
+        // No changes to make, return current user data
+        return await tx.user.findUnique({
+          where: { id: userId },
+          select: {
+            id: true,
+            email: true,
+            name: true,
+            role: true,
+            emailVerified: true,
+            updatedAt: true,
+          },
+        });
+      }
+
+      // Perform the update within the same transaction
+      return await tx.user.update({
+        where: { id: userId },
+        data: updateData,
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          role: true,
+          emailVerified: true,
+          updatedAt: true,
+        },
+      });
     });
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
     return res.json({ user });
   } catch (error: unknown) {
+    // Handle NOT_FOUND error from transaction
+    if (error instanceof Error && error.message === 'NOT_FOUND') {
+      return res.status(404).json({ message: 'User not found' });
+    }
     // Handle Prisma unique constraint violation (P2002)
     if (
       error &&

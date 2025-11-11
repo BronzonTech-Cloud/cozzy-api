@@ -90,6 +90,11 @@ export async function updateAddress(req: Request, res: Response) {
       }
     }
 
+    // Check if updateData is empty before starting transaction
+    if (Object.keys(updateData).length === 0) {
+      return res.status(400).json({ message: 'No valid fields to update' });
+    }
+
     // Execute all operations in a single transaction to avoid TOCTOU
     const address = await prisma.$transaction(async (tx) => {
       // Check if address belongs to user

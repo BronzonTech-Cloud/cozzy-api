@@ -34,13 +34,13 @@ export async function createOrder(req: Request, res: Response) {
   let discountCents = 0;
   let appliedCouponId: string | null = null;
   if (couponId) {
-    // Look up coupon by ID first
+    // Look up coupon by ID and pass the object directly to avoid double lookup
     const coupon = await prisma.coupon.findUnique({ where: { id: couponId } });
     if (!coupon) {
       return res.status(400).json({ message: 'Coupon not found' });
     }
-    // Validate and calculate using the coupon code
-    const couponResult = await validateAndCalculateCoupon(coupon.code, subtotalCents);
+    // Validate and calculate using the coupon object directly (avoids second DB lookup)
+    const couponResult = await validateAndCalculateCoupon(coupon, subtotalCents);
     if (!couponResult.valid) {
       return res.status(400).json({ message: couponResult.error || 'Invalid coupon' });
     }
