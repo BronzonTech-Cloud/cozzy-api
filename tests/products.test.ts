@@ -1,7 +1,13 @@
 import request from 'supertest';
 
 import { createApp } from '../src/app';
-import { createTestUser, createTestCategory, createTestProduct, cleanupDatabase } from './helpers';
+import {
+  createTestUser,
+  createTestUserAndLogin,
+  createTestCategory,
+  createTestProduct,
+  cleanupDatabase,
+} from './helpers';
 
 const app = createApp();
 
@@ -11,16 +17,10 @@ describe('Products', () => {
 
   beforeEach(async () => {
     await cleanupDatabase();
-    await createTestUser('admin@example.com', 'ADMIN');
-
-    const loginRes = await request(app).post('/api/v1/auth/login').send({
-      email: 'admin@example.com',
-      password: 'password123',
-    });
-
-    expect(loginRes.status).toBe(200);
-    expect(loginRes.body).toHaveProperty('accessToken');
-    adminToken = loginRes.body.accessToken;
+    
+    // Create admin user and get token using helper
+    const adminResult = await createTestUserAndLogin(app, 'admin@example.com', 'ADMIN');
+    adminToken = adminResult.token;
 
     const category = await createTestCategory('Electronics');
     categoryId = category.id;

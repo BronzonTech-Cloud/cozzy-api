@@ -1,7 +1,7 @@
 import request from 'supertest';
 
 import { createApp } from '../src/app';
-import { createTestUser, cleanupDatabase } from './helpers';
+import { createTestUser, createTestUserAndLogin, cleanupDatabase } from './helpers';
 
 const app = createApp();
 
@@ -11,16 +11,11 @@ describe('Profile', () => {
 
   beforeEach(async () => {
     await cleanupDatabase();
-    const user = await createTestUser('user@example.com', 'USER');
-    userId = user.id;
-
-    const loginRes = await request(app).post('/api/v1/auth/login').send({
-      email: 'user@example.com',
-      password: 'password123',
-    });
-
-    expect(loginRes.status).toBe(200);
-    userToken = loginRes.body.accessToken;
+    
+    // Create user and get token using helper
+    const userResult = await createTestUserAndLogin(app, 'user@example.com', 'USER');
+    userToken = userResult.token;
+    userId = userResult.user.id;
   });
 
   describe('GET /api/v1/profile', () => {

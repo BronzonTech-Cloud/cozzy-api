@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs';
+import type { Express } from 'express';
 import request from 'supertest';
 
 import { prisma } from '../src/config/prisma';
@@ -8,7 +9,7 @@ import { prisma } from '../src/config/prisma';
  * Ensures user exists and login succeeds before returning token
  */
 export async function createTestUserAndLogin(
-  app: ReturnType<typeof request>,
+  app: Express,
   email: string,
   role: 'USER' | 'ADMIN' = 'USER',
 ): Promise<{ user: Awaited<ReturnType<typeof createTestUser>>; token: string }> {
@@ -20,6 +21,20 @@ export async function createTestUserAndLogin(
     throw new Error(`Failed to create test user: ${email}`);
   }
 
+  // Small delay to ensure database transaction is committed and visible
+  // This helps prevent race conditions in CI environments
+  await new Promise((resolve) => setTimeout(resolve, 50));
+
+  // Verify user exists in database before attempting login
+  const verifyUser = await prisma.user.findUnique({
+    where: { email },
+    select: { id: true, email: true, passwordHash: true },
+  });
+
+  if (!verifyUser) {
+    throw new Error(`User ${email} was created but not found in database before login attempt`);
+  }
+
   // Login to get token
   const loginRes = await request(app).post('/api/v1/auth/login').send({
     email,
@@ -28,8 +43,13 @@ export async function createTestUserAndLogin(
 
   // Verify login succeeded
   if (loginRes.status !== 200) {
+    // Additional debugging: check if user exists and verify password hash
+    const debugUser = await prisma.user.findUnique({
+      where: { email },
+      select: { id: true, email: true, passwordHash: true },
+    });
     throw new Error(
-      `Login failed for ${email}: ${loginRes.status} - ${JSON.stringify(loginRes.body)}`,
+      `Login failed for ${email}: ${loginRes.status} - ${JSON.stringify(loginRes.body)}. User exists: ${!!debugUser}, User ID: ${user.id}`,
     );
   }
 
@@ -104,6 +124,18 @@ export async function createTestCategory(name: string, slug?: string) {
       throw new Error(`Failed to create/update category with slug ${categorySlug}`);
     }
     
+    // Small delay to ensure database transaction is committed
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    
+    // Verify category exists in database
+    const verifyCategory = await prisma.category.findUnique({
+      where: { id: category.id },
+    });
+    
+    if (!verifyCategory) {
+      throw new Error(`Category ${name} was created but not found in database`);
+    }
+    
     return category;
   } catch (error) {
     console.error(`Error creating test category ${name} (slug: ${categorySlug}):`, error);
@@ -122,9 +154,18 @@ export async function createTestProduct(
   },
 ) {
   // Validate category exists before creating product
-  const category = await prisma.category.findUnique({
+  // Retry logic to handle potential timing issues in CI
+  let category = await prisma.category.findUnique({
     where: { id: categoryId },
   });
+  
+  if (!category) {
+    // Retry once after a short delay (handles potential race conditions)
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    category = await prisma.category.findUnique({
+      where: { id: categoryId },
+    });
+  }
   
   if (!category) {
     throw new Error(

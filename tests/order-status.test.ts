@@ -2,7 +2,13 @@ import request from 'supertest';
 
 import { createApp } from '../src/app';
 import { prisma } from '../src/config/prisma';
-import { createTestUser, createTestCategory, createTestProduct, cleanupDatabase } from './helpers';
+import {
+  createTestUser,
+  createTestUserAndLogin,
+  createTestCategory,
+  createTestProduct,
+  cleanupDatabase,
+} from './helpers';
 
 const app = createApp();
 
@@ -15,20 +21,13 @@ describe('Order Status Tracking', () => {
 
   beforeEach(async () => {
     await cleanupDatabase();
-    await createTestUser('user@example.com', 'USER');
-    await createTestUser('admin@example.com', 'ADMIN');
+    
+    // Create users and get tokens using helper
+    const userResult = await createTestUserAndLogin(app, 'user@example.com', 'USER');
+    userToken = userResult.token;
 
-    const userLogin = await request(app).post('/api/v1/auth/login').send({
-      email: 'user@example.com',
-      password: 'password123',
-    });
-    userToken = userLogin.body.accessToken;
-
-    const adminLogin = await request(app).post('/api/v1/auth/login').send({
-      email: 'admin@example.com',
-      password: 'password123',
-    });
-    adminToken = adminLogin.body.accessToken;
+    const adminResult = await createTestUserAndLogin(app, 'admin@example.com', 'ADMIN');
+    adminToken = adminResult.token;
 
     const category = await createTestCategory('Electronics');
     categoryId = category.id;
@@ -45,6 +44,8 @@ describe('Order Status Tracking', () => {
       });
 
     expect(orderRes.status).toBe(201);
+    expect(orderRes.body).toHaveProperty('order');
+    expect(orderRes.body.order).toHaveProperty('id');
     orderId = orderRes.body.order.id;
   });
 

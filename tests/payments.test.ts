@@ -2,7 +2,13 @@ import request from 'supertest';
 import { vi } from 'vitest';
 
 import { createApp } from '../src/app';
-import { createTestUser, createTestCategory, createTestProduct, cleanupDatabase } from './helpers';
+import {
+  createTestUser,
+  createTestUserAndLogin,
+  createTestCategory,
+  createTestProduct,
+  cleanupDatabase,
+} from './helpers';
 
 vi.mock('../src/config/stripe', () => {
   const mockCreate = vi.fn().mockResolvedValue({ url: 'https://mock.checkout/session' });
@@ -52,16 +58,10 @@ describe('Payments', () => {
 
   beforeEach(async () => {
     await cleanupDatabase();
-    await createTestUser('user@example.com', 'USER');
-
-    const loginRes = await request(app).post('/api/v1/auth/login').send({
-      email: 'user@example.com',
-      password: 'password123',
-    });
-
-    expect(loginRes.status).toBe(200);
-    expect(loginRes.body).toHaveProperty('accessToken');
-    userToken = loginRes.body.accessToken;
+    
+    // Create user and get token using helper
+    const userResult = await createTestUserAndLogin(app, 'user@example.com', 'USER');
+    userToken = userResult.token;
 
     const category = await createTestCategory('Electronics');
     categoryId = category.id;
@@ -103,15 +103,12 @@ describe('Payments', () => {
     });
 
     it('should reject checkout for order not owned by user', async () => {
-      await createTestUser('other@example.com', 'USER');
-      const otherLogin = await request(app).post('/api/v1/auth/login').send({
-        email: 'other@example.com',
-        password: 'password123',
-      });
+      const otherResult = await createTestUserAndLogin(app, 'other@example.com', 'USER');
+      const otherToken = otherResult.token;
 
       const res = await request(app)
         .post('/api/v1/payments/checkout')
-        .set('Authorization', `Bearer ${otherLogin.body.accessToken}`)
+        .set('Authorization', `Bearer ${otherToken}`)
         .send({ orderId });
 
       expect(res.status).toBe(403);

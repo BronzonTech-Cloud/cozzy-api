@@ -2,7 +2,7 @@ import request from 'supertest';
 
 import { createApp } from '../src/app';
 import { prisma } from '../src/config/prisma';
-import { createTestUser, cleanupDatabase } from './helpers';
+import { createTestUser, createTestUserAndLogin, cleanupDatabase } from './helpers';
 
 const app = createApp();
 

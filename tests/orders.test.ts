@@ -1,7 +1,13 @@
 import request from 'supertest';
 
 import { createApp } from '../src/app';
-import { createTestUser, createTestCategory, createTestProduct, cleanupDatabase } from './helpers';
+import {
+  createTestUser,
+  createTestUserAndLogin,
+  createTestCategory,
+  createTestProduct,
+  cleanupDatabase,
+} from './helpers';
 
 const app = createApp();
 
@@ -13,24 +19,13 @@ describe('Orders', () => {
 
   beforeEach(async () => {
     await cleanupDatabase();
-    await createTestUser('user@example.com', 'USER');
-    await createTestUser('admin@example.com', 'ADMIN');
+    
+    // Create users and get tokens using helper
+    const userResult = await createTestUserAndLogin(app, 'user@example.com', 'USER');
+    userToken = userResult.token;
 
-    const userLogin = await request(app).post('/api/v1/auth/login').send({
-      email: 'user@example.com',
-      password: 'password123',
-    });
-    expect(userLogin.status).toBe(200);
-    expect(userLogin.body).toHaveProperty('accessToken');
-    userToken = userLogin.body.accessToken;
-
-    const adminLogin = await request(app).post('/api/v1/auth/login').send({
-      email: 'admin@example.com',
-      password: 'password123',
-    });
-    expect(adminLogin.status).toBe(200);
-    expect(adminLogin.body).toHaveProperty('accessToken');
-    adminToken = adminLogin.body.accessToken;
+    const adminResult = await createTestUserAndLogin(app, 'admin@example.com', 'ADMIN');
+    adminToken = adminResult.token;
 
     const category = await createTestCategory('Electronics');
     categoryId = category.id;

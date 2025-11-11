@@ -1,7 +1,7 @@
 import request from 'supertest';
 
 import { createApp } from '../src/app';
-import { createTestUser, cleanupDatabase } from './helpers';
+import { createTestUser, createTestUserAndLogin, cleanupDatabase } from './helpers';
 
 const app = createApp();
 
@@ -10,15 +10,10 @@ describe('Address', () => {
 
   beforeEach(async () => {
     await cleanupDatabase();
-    await createTestUser('user@example.com', 'USER');
-
-    const loginRes = await request(app).post('/api/v1/auth/login').send({
-      email: 'user@example.com',
-      password: 'password123',
-    });
-
-    expect(loginRes.status).toBe(200);
-    userToken = loginRes.body.accessToken;
+    
+    // Create user and get token using helper
+    const userResult = await createTestUserAndLogin(app, 'user@example.com', 'USER');
+    userToken = userResult.token;
   });
 
   describe('GET /api/v1/profile/addresses', () => {
@@ -222,12 +217,8 @@ describe('Address', () => {
     });
 
     it('should return 404 for address belonging to another user', async () => {
-      await createTestUser('other@example.com', 'USER');
-      const loginRes = await request(app).post('/api/v1/auth/login').send({
-        email: 'other@example.com',
-        password: 'password123',
-      });
-      const otherToken = loginRes.body.accessToken;
+      const otherResult = await createTestUserAndLogin(app, 'other@example.com', 'USER');
+      const otherToken = otherResult.token;
 
       // Try to update address from different user
       const res = await request(app)
@@ -283,12 +274,8 @@ describe('Address', () => {
     });
 
     it('should return 404 for address belonging to another user', async () => {
-      await createTestUser('other@example.com', 'USER');
-      const loginRes = await request(app).post('/api/v1/auth/login').send({
-        email: 'other@example.com',
-        password: 'password123',
-      });
-      const otherToken = loginRes.body.accessToken;
+      const otherResult = await createTestUserAndLogin(app, 'other@example.com', 'USER');
+      const otherToken = otherResult.token;
 
       const res = await request(app)
         .delete(`/api/v1/profile/addresses/${addressId}`)

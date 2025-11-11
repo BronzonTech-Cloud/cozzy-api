@@ -1,7 +1,7 @@
 import request from 'supertest';
 
 import { createApp } from '../src/app';
-import { createTestUser, cleanupDatabase } from './helpers';
+import { createTestUser, createTestUserAndLogin, cleanupDatabase } from './helpers';
 
 const app = createApp();
 
@@ -11,24 +11,13 @@ describe('Users', () => {
 
   beforeEach(async () => {
     await cleanupDatabase();
-    await createTestUser('admin@example.com', 'ADMIN');
-    await createTestUser('user@example.com', 'USER');
+    
+    // Create users and get tokens using helper
+    const adminResult = await createTestUserAndLogin(app, 'admin@example.com', 'ADMIN');
+    adminToken = adminResult.token;
 
-    const adminLogin = await request(app).post('/api/v1/auth/login').send({
-      email: 'admin@example.com',
-      password: 'password123',
-    });
-    expect(adminLogin.status).toBe(200);
-    expect(adminLogin.body).toHaveProperty('accessToken');
-    adminToken = adminLogin.body.accessToken;
-
-    const userLogin = await request(app).post('/api/v1/auth/login').send({
-      email: 'user@example.com',
-      password: 'password123',
-    });
-    expect(userLogin.status).toBe(200);
-    expect(userLogin.body).toHaveProperty('accessToken');
-    userToken = userLogin.body.accessToken;
+    const userResult = await createTestUserAndLogin(app, 'user@example.com', 'USER');
+    userToken = userResult.token;
   });
 
   describe('GET /api/v1/users', () => {
