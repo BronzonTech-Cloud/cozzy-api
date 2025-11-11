@@ -51,17 +51,24 @@ export async function createTestProduct(
     title?: string;
     priceCents?: number;
     stock?: number;
+    slug?: string;
+    active?: boolean;
   },
 ) {
+  // Generate unique slug to avoid unique constraint violations
+  // Use timestamp + random number to ensure uniqueness across test runs
+  const baseSlug = data?.slug || (data?.title || 'test-product').toLowerCase().replace(/\s+/g, '-');
+  const uniqueSlug = `${baseSlug}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
   return prisma.product.create({
     data: {
       title: data?.title || 'Test Product',
-      slug: (data?.title || 'test-product').toLowerCase().replace(/\s+/g, '-'),
+      slug: uniqueSlug,
       description: 'Test product description',
       priceCents: data?.priceCents || 1000,
       currency: 'USD',
       images: [],
-      active: true,
+      active: data?.active !== undefined ? data.active : true,
       stock: data?.stock || 10,
       categoryId,
     },

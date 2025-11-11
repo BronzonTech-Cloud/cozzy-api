@@ -213,15 +213,20 @@ describe('Reviews', () => {
       await createTestUser('user3@example.com', 'USER');
 
       // Create multiple reviews sequentially to ensure different timestamps
+      // Ensure all users exist before creating reviews to avoid foreign key violations
       const user = await prisma.user.findUnique({ where: { email: 'user@example.com' } });
       const user2 = await prisma.user.findUnique({ where: { email: 'user2@example.com' } });
       const user3 = await prisma.user.findUnique({ where: { email: 'user3@example.com' } });
+
+      if (!user || !user2 || !user3) {
+        throw new Error('Test users not found. Ensure beforeEach creates all users.');
+      }
 
       // Create reviews sequentially with small delays to ensure different timestamps
       await prisma.review.create({
         data: {
           productId,
-          userId: user!.id,
+          userId: user.id,
           rating: 5,
           title: 'Great!',
           comment: 'Excellent product',
@@ -234,7 +239,7 @@ describe('Reviews', () => {
       await prisma.review.create({
         data: {
           productId,
-          userId: user2!.id,
+          userId: user2.id,
           rating: 4,
           title: 'Good',
           comment: 'Good product',
@@ -247,7 +252,7 @@ describe('Reviews', () => {
       await prisma.review.create({
         data: {
           productId,
-          userId: user3!.id,
+          userId: user3.id,
           rating: 3,
           title: 'Average',
           comment: 'Average product',
@@ -340,10 +345,14 @@ describe('Reviews', () => {
   describe('GET /api/v1/reviews/:reviewId', () => {
     beforeEach(async () => {
       const user = await prisma.user.findUnique({ where: { email: 'user@example.com' } });
+      if (!user) {
+        throw new Error('Test user not found. Ensure beforeEach creates the user.');
+      }
+
       const review = await prisma.review.create({
         data: {
           productId,
-          userId: user!.id,
+          userId: user.id,
           rating: 5,
           title: 'Great product!',
           comment: 'Excellent',
@@ -374,10 +383,14 @@ describe('Reviews', () => {
   describe('PATCH /api/v1/reviews/:reviewId', () => {
     beforeEach(async () => {
       const user = await prisma.user.findUnique({ where: { email: 'user@example.com' } });
+      if (!user) {
+        throw new Error('Test user not found. Ensure beforeEach creates the user.');
+      }
+
       const review = await prisma.review.create({
         data: {
           productId,
-          userId: user!.id,
+          userId: user.id,
           rating: 5,
           title: 'Great product!',
           comment: 'Excellent',
@@ -452,10 +465,14 @@ describe('Reviews', () => {
   describe('DELETE /api/v1/reviews/:reviewId', () => {
     beforeEach(async () => {
       const user = await prisma.user.findUnique({ where: { email: 'user@example.com' } });
+      if (!user) {
+        throw new Error('Test user not found. Ensure beforeEach creates the user.');
+      }
+
       const review = await prisma.review.create({
         data: {
           productId,
-          userId: user!.id,
+          userId: user.id,
           rating: 5,
         },
       });

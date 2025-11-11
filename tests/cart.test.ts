@@ -1,7 +1,12 @@
 import request from 'supertest';
 
 import { createApp } from '../src/app';
-import { createTestUser, createTestCategory, createTestProduct, cleanupDatabase } from './helpers';
+import {
+  createTestUser,
+  createTestCategory,
+  createTestProduct,
+  cleanupDatabase,
+} from './helpers';
 
 const app = createApp();
 
@@ -127,20 +132,11 @@ describe('Cart', () => {
     });
 
     it('should reject adding inactive product', async () => {
-      // Create inactive product directly
-      const { prisma } = await import('../src/config/prisma');
-      const inactiveProduct = await prisma.product.create({
-        data: {
-          title: 'Inactive Product',
-          slug: 'inactive-product',
-          description: 'Inactive product description',
-          priceCents: 1000,
-          currency: 'USD',
-          images: [],
-          active: false, // Inactive product
-          stock: 10,
-          categoryId,
-        },
+      // Create inactive product using helper to ensure unique slug and proper setup
+      const inactiveProduct = await createTestProduct(categoryId, {
+        title: 'Inactive Product',
+        active: false,
+        stock: 10,
       });
 
       const res = await request(app)

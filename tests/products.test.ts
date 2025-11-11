@@ -62,9 +62,9 @@ describe('Products', () => {
 
   describe('GET /api/v1/products/:slug', () => {
     it('should get product by slug', async () => {
-      await createTestProduct(categoryId, { title: 'Test Product' });
+      const product = await createTestProduct(categoryId, { title: 'Test Product' });
 
-      const res = await request(app).get('/api/v1/products/test-product');
+      const res = await request(app).get(`/api/v1/products/${product.slug}`);
 
       expect(res.status).toBe(200);
       expect(res.body.product.title).toBe('Test Product');

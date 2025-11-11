@@ -139,19 +139,11 @@ describe('Wishlist', () => {
     });
 
     it('should reject adding inactive product', async () => {
-      // Create inactive product
-      const inactiveProduct = await prisma.product.create({
-        data: {
-          title: 'Inactive Product',
-          slug: 'inactive-product',
-          description: 'Inactive product description',
-          priceCents: 1000,
-          currency: 'USD',
-          images: [],
-          active: false,
-          stock: 10,
-          categoryId,
-        },
+      // Create inactive product using helper to ensure unique slug
+      const inactiveProduct = await createTestProduct(categoryId, {
+        title: 'Inactive Product',
+        active: false,
+        stock: 10,
       });
 
       const res = await request(app)
