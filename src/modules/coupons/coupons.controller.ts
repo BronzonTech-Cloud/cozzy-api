@@ -144,6 +144,10 @@ export async function createCoupon(req: Request, res: Response) {
 
     return res.status(201).json({ coupon });
   } catch (error) {
+    // Handle Prisma errors
+    if (handlePrismaError(error, res)) {
+      return;
+    }
     console.error(
       'Error in createCoupon:',
       error instanceof Error ? error.message : 'Unknown error',

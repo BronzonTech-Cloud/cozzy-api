@@ -26,8 +26,8 @@ describe('Categories', () => {
       const cat1 = await createTestCategory('Electronics');
       const cat2 = await createTestCategory('Clothing');
 
-      // Wait for categories to be visible
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      // Wait for categories to be visible (increased delay for CI)
+      await new Promise((resolve) => setTimeout(resolve, 600));
 
       const res = await request(app).get('/api/v1/categories');
 

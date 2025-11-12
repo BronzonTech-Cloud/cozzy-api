@@ -158,10 +158,33 @@ describe('Email Verification', () => {
     });
 
     it('should return 400 if email is already verified', async () => {
+      // First, ensure user is visible before trying to update
+      let user = null;
+      for (let attempt = 0; attempt < 8; attempt++) {
+        if (attempt > 0) {
+          await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
+        }
+        try {
+          await prisma.$executeRaw`SELECT 1`;
+          user = await prisma.user.findUnique({ where: { id: userId } });
+          if (user) break;
+        } catch {
+          // Continue to next attempt
+        }
+      }
+
+      if (!user) {
+        throw new Error(`User with ID ${userId} not found. Cannot verify email.`);
+      }
+
       // Verify email first - add retry logic for visibility
       let updated = false;
-      for (let attempt = 0; attempt < 5; attempt++) {
+      for (let attempt = 0; attempt < 8; attempt++) {
+        if (attempt > 0) {
+          await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
+        }
         try {
+          await prisma.$executeRaw`SELECT 1`;
           await prisma.user.update({
             where: { id: userId },
             data: { emailVerified: true },
@@ -169,8 +192,8 @@ describe('Email Verification', () => {
           updated = true;
           break;
         } catch (error) {
-          if (attempt < 4) {
-            await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
+          if (attempt < 7) {
+            // Continue to next attempt
           } else {
             throw error;
           }

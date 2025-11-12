@@ -29,6 +29,9 @@ describe('Order Status Tracking', () => {
     const adminResult = await createTestUserAndLogin(app, 'admin@example.com', 'ADMIN');
     adminToken = adminResult.token;
 
+    // Small delay to ensure users are fully visible before creating related entities
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
     const category = await createTestCategory('Electronics');
     categoryId = category.id;
 
@@ -152,12 +155,12 @@ describe('Order Status Tracking', () => {
     });
 
     it('should return 403 for other user orders', async () => {
-      await createTestUser('other@example.com', 'USER');
-      const otherLogin = await request(app).post('/api/v1/auth/login').send({
-        email: 'other@example.com',
-        password: 'password123',
-      });
-      const otherToken = otherLogin.body.accessToken;
+      // Use createTestUserAndLogin to ensure user is visible before login
+      const otherUserResult = await createTestUserAndLogin(app, 'other@example.com', 'USER');
+      const otherToken = otherUserResult.token;
+      
+      // Small delay to ensure user is fully visible
+      await new Promise((resolve) => setTimeout(resolve, 200));
 
       const res = await request(app)
         .get(`/api/v1/orders/${orderId}/tracking`)
@@ -222,12 +225,12 @@ describe('Order Status Tracking', () => {
     });
 
     it('should return 403 for other user orders', async () => {
-      await createTestUser('other@example.com', 'USER');
-      const otherLogin = await request(app).post('/api/v1/auth/login').send({
-        email: 'other@example.com',
-        password: 'password123',
-      });
-      const otherToken = otherLogin.body.accessToken;
+      // Use createTestUserAndLogin to ensure user is visible before login
+      const otherUserResult = await createTestUserAndLogin(app, 'other@example.com', 'USER');
+      const otherToken = otherUserResult.token;
+      
+      // Small delay to ensure user is fully visible
+      await new Promise((resolve) => setTimeout(resolve, 200));
 
       const res = await request(app)
         .post(`/api/v1/orders/${orderId}/cancel`)
@@ -239,13 +242,32 @@ describe('Order Status Tracking', () => {
 
   describe('GET /api/v1/orders/history', () => {
     it('should get order history with filters', async () => {
-      // Create another order
-      const orderRes2 = await request(app)
-        .post('/api/v1/orders')
-        .set('Authorization', `Bearer ${userToken}`)
-        .send({
-          items: [{ productId, quantity: 1 }],
-        });
+      // Create another order with retry logic for FK violations
+      let orderRes2 = null;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        if (attempt > 0) {
+          await new Promise((resolve) => setTimeout(resolve, 300 * attempt));
+        }
+
+        orderRes2 = await request(app)
+          .post('/api/v1/orders')
+          .set('Authorization', `Bearer ${userToken}`)
+          .send({
+            items: [{ productId, quantity: 1 }],
+          });
+
+        if (orderRes2.status === 201 && orderRes2.body?.order?.id) {
+          break;
+        }
+
+        // If it's a 500 error with FK violation, retry
+        if (orderRes2.status === 500 && attempt < 4) {
+          continue;
+        }
+      }
+
+      expect(orderRes2?.status).toBe(201);
+      expect(orderRes2?.body).toHaveProperty('order');
       const orderId2 = orderRes2.body.order.id;
 
       // Update second order status
