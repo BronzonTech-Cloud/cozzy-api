@@ -188,6 +188,11 @@ export async function createTestUser(email: string, role: 'USER' | 'ADMIN' = 'US
   // This is more reliable than delete-then-create, especially in CI environments
   const passwordHash = await bcrypt.hash('password123', 10);
 
+  // Ensure password hash is valid
+  if (!passwordHash || passwordHash.length === 0) {
+    throw new Error(`Failed to generate password hash for user ${email}`);
+  }
+
   try {
     // Direct upsert (no transaction wrapper) - upsert is already atomic
     // Transaction wrappers can cause visibility issues across connection pools in CI
@@ -196,13 +201,13 @@ export async function createTestUser(email: string, role: 'USER' | 'ADMIN' = 'US
       update: {
         // Update role and password in case user already exists with different values
         role,
-        passwordHash,
+        passwordHash, // Ensure password hash is always set
         name: 'Test User',
       },
       create: {
         email,
         name: 'Test User',
-        passwordHash,
+        passwordHash, // Ensure password hash is always set
         role,
       },
     });
@@ -212,19 +217,33 @@ export async function createTestUser(email: string, role: 'USER' | 'ADMIN' = 'US
       throw new Error(`Failed to create/update user with email ${email}`);
     }
 
+    // CRITICAL: Verify password hash was set correctly
+    if (!user.passwordHash) {
+      // If password hash is missing, update it explicitly
+      const updatedUser = await prisma.user.update({
+        where: { id: user.id },
+        data: { passwordHash },
+      });
+      if (!updatedUser.passwordHash) {
+        throw new Error(`Password hash not set for user ${email} (ID: ${user.id})`);
+      }
+      // Use updated user
+      Object.assign(user, updatedUser);
+    }
+
     // Force connection refresh by executing queries to cycle through connection pool
     // This helps ensure subsequent queries use a fresh connection
     await prisma.$executeRaw`SELECT 1`;
 
     // Delay to ensure commit is visible - upsert is atomic and commits immediately
     // Increased delay for CI environments where connection pool visibility can be slower
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    await new Promise((resolve) => setTimeout(resolve, 500));
 
-    // Lightweight verification: try to find the user by ID (most reliable)
-    // If this fails, we still return the user object from upsert (trust the operation)
-    // The verification is just a sanity check, not a hard requirement
+    // CRITICAL: Verify user is visible by email (same query as login endpoint)
+    // This ensures the user can be found when login attempts to query by email
     let verifyUser = null;
-    const quickVerificationAttempts = 5; // Increased for CI reliability
+    let verifyUserByEmail = null;
+    const quickVerificationAttempts = 8; // Increased for CI reliability
 
     for (let attempt = 0; attempt < quickVerificationAttempts; attempt++) {
       if (attempt > 0) {
@@ -233,28 +252,81 @@ export async function createTestUser(email: string, role: 'USER' | 'ADMIN' = 'US
 
       try {
         // Query by ID - most reliable since we have the exact ID from upsert
-        const idResult = await prisma.$queryRaw<Array<{ id: string; email: string }>>`
-          SELECT id, email FROM "User" WHERE id = ${user.id} LIMIT 1
+        const idResult = await prisma.$queryRaw<
+          Array<{ id: string; email: string; passwordHash: string | null }>
+        >`
+          SELECT id, email, "passwordHash" FROM "User" WHERE id = ${user.id} LIMIT 1
         `;
 
         if (idResult && idResult.length > 0) {
           verifyUser = idResult[0];
+        }
+
+        // CRITICAL: Also verify by email (same as login endpoint)
+        const emailResult = await prisma.$queryRaw<
+          Array<{ id: string; email: string; passwordHash: string | null }>
+        >`
+          SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
+        `;
+
+        if (emailResult && emailResult.length > 0 && emailResult[0].id === user.id) {
+          verifyUserByEmail = emailResult[0];
+          // Verify password hash is set
+          if (!verifyUserByEmail.passwordHash) {
+            // Password hash missing - update it
+            await prisma.user.update({
+              where: { id: user.id },
+              data: { passwordHash },
+            });
+            // Re-query to get updated user
+            const recheck = await prisma.$queryRaw<
+              Array<{ id: string; email: string; passwordHash: string | null }>
+            >`
+              SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
+            `;
+            if (recheck && recheck.length > 0) {
+              verifyUserByEmail = recheck[0];
+            }
+          }
+        }
+
+        // If both verifications pass, we're good
+        if (verifyUser && verifyUserByEmail && verifyUserByEmail.passwordHash) {
           break;
         }
-      } catch {
+      } catch (error) {
         // Continue to next attempt
+        if (process.env.NODE_ENV === 'development') {
+          console.warn(`Verification attempt ${attempt + 1} failed for ${email}:`, error);
+        }
       }
     }
 
-    // Even if verification fails, trust the upsert result and return the user
-    // The upsert operation is atomic and returns the created/updated record
-    // If verification fails, it's likely a connection pool visibility issue, not a real problem
-    // Add extra delay if verification failed to give more time for visibility
-    if (!verifyUser) {
-      await new Promise((resolve) => setTimeout(resolve, 300));
+    // If verification failed, add extra delay and try one more time
+    if (!verifyUserByEmail || !verifyUserByEmail.passwordHash) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      
+      // Final attempt: ensure password hash is set
+      const finalCheck = await prisma.user.findUnique({
+        where: { id: user.id },
+        select: { id: true, email: true, passwordHash: true },
+      });
+
+      if (!finalCheck) {
+        throw new Error(`User ${email} (ID: ${user.id}) not found after creation`);
+      }
+
+      if (!finalCheck.passwordHash) {
+        // Update password hash one more time
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { passwordHash },
+        });
+      }
+
       if (process.env.NODE_ENV === 'development') {
         console.warn(
-          `User ${email} verification failed, but returning user from upsert (ID: ${user.id})`,
+          `User ${email} (ID: ${user.id}) verification had issues, but password hash ensured`,
         );
       }
     }
@@ -561,6 +633,11 @@ export async function cleanupDatabase() {
     cleanupInProgress = false; // Reset flag in case it was stuck
   }
 
+  // CRITICAL: Add a small delay after waiting for cleanup to ensure any previous
+  // cleanup operations are fully committed and visible before starting new cleanup
+  // This prevents race conditions where user creation happens before cleanup completes
+  await new Promise((resolve) => setTimeout(resolve, 100));
+
   // Check if we've already exceeded timeout
   if (Date.now() - cleanupStartTime > cleanupTimeout) {
     throw new Error(
@@ -615,8 +692,9 @@ export async function cleanupDatabase() {
 
         await prisma.$executeRawUnsafe(`TRUNCATE TABLE ${tableNames} RESTART IDENTITY CASCADE;`);
 
-        // Shorter delay - TRUNCATE is atomic and should be immediately visible
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        // CRITICAL: Delay after TRUNCATE to ensure it's fully committed and visible
+        // This prevents race conditions where user creation starts before cleanup is visible
+        await new Promise((resolve) => setTimeout(resolve, 200));
 
         // Success - break out of retry loop
         return;
@@ -682,9 +760,13 @@ export async function cleanupDatabase() {
       safeDelete('user', () => prisma.user.deleteMany()),
     ]);
 
-    // Shorter delay after fallback cleanup
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // Delay after fallback cleanup to ensure all deletes are committed
+    await new Promise((resolve) => setTimeout(resolve, 200));
   } finally {
+    // CRITICAL: Add delay before releasing mutex to ensure cleanup is fully committed
+    // This prevents race conditions where user creation starts before cleanup is visible
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    
     // Release mutex and notify waiting operations
     cleanupInProgress = false;
     // Process queue: notify next waiting operation

@@ -346,7 +346,8 @@ export async function validateCoupon(req: Request, res: Response) {
     }
 
     // Check usage limit
-    if (coupon.usageLimit && coupon.usageCount >= coupon.usageLimit) {
+    // Explicitly check for null/undefined to enforce usageLimit = 0
+    if (coupon.usageLimit != null && coupon.usageCount >= coupon.usageLimit) {
       return res.status(400).json({ message: 'Coupon usage limit reached' });
     }
 
