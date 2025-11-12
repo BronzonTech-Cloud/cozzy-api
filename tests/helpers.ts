@@ -56,37 +56,73 @@ export async function createTestUserAndLogin(
     await prisma.$executeRaw`SELECT 1`;
 
     try {
-      // Query by email (same as login endpoint) and check password hash
-      const emailCheck = await prisma.$queryRaw<
-        Array<{ id: string; email: string; passwordHash: string | null }>
-      >`
-        SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
-      `;
-
-      if (emailCheck && emailCheck.length > 0 && emailCheck[0].id === user.id) {
+      // Strategy 1: Try Prisma findUnique by email (same as login endpoint)
+      const prismaEmailCheck = await prisma.user.findUnique({
+        where: { email },
+      });
+      if (prismaEmailCheck && prismaEmailCheck.id === user.id) {
         userVisibleByEmail = true;
-        // CRITICAL: Also check password hash is present
-        if (emailCheck[0].passwordHash) {
+        if (prismaEmailCheck.passwordHash) {
           userHasPasswordHash = true;
           break;
         } else {
           // Password hash missing - try to update it
           try {
-            await prisma.$executeRaw`
-              UPDATE "User" SET "passwordHash" = ${expectedPasswordHash || (await bcrypt.hash('password123', 10))} WHERE id = ${user.id}
-            `;
+            const hashToUse = expectedPasswordHash || (await bcrypt.hash('password123', 10));
+            await prisma.user.update({
+              where: { id: user.id },
+              data: { passwordHash: hashToUse },
+            });
             // Re-check after update
-            const recheck = await prisma.$queryRaw<
-              Array<{ id: string; email: string; passwordHash: string | null }>
-            >`
-              SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
-            `;
-            if (recheck && recheck.length > 0 && recheck[0].passwordHash) {
+            await new Promise((resolve) => setTimeout(resolve, 200));
+            const recheck = await prisma.user.findUnique({
+              where: { email },
+            });
+            if (recheck && recheck.passwordHash) {
               userHasPasswordHash = true;
               break;
             }
           } catch {
             // Continue to next attempt
+          }
+        }
+      }
+
+      // Strategy 2: Try raw SQL query by email (bypasses some caching)
+      if (!userVisibleByEmail || !userHasPasswordHash) {
+        const emailCheck = await prisma.$queryRaw<
+          Array<{ id: string; email: string; passwordHash: string | null }>
+        >`
+          SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
+        `;
+
+        if (emailCheck && emailCheck.length > 0 && emailCheck[0].id === user.id) {
+          userVisibleByEmail = true;
+          // CRITICAL: Also check password hash is present
+          if (emailCheck[0].passwordHash) {
+            userHasPasswordHash = true;
+            break;
+          } else {
+            // Password hash missing - try to update it
+            try {
+              const hashToUse = expectedPasswordHash || (await bcrypt.hash('password123', 10));
+              await prisma.$executeRaw`
+                UPDATE "User" SET "passwordHash" = ${hashToUse} WHERE id = ${user.id}
+              `;
+              // Re-check after update
+              await new Promise((resolve) => setTimeout(resolve, 200));
+              const recheck = await prisma.$queryRaw<
+                Array<{ id: string; email: string; passwordHash: string | null }>
+              >`
+                SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
+              `;
+              if (recheck && recheck.length > 0 && recheck[0].passwordHash) {
+                userHasPasswordHash = true;
+                break;
+              }
+            } catch {
+              // Continue to next attempt
+            }
           }
         }
       }
@@ -103,36 +139,69 @@ export async function createTestUserAndLogin(
     // Force connection refresh
     await prisma.$executeRaw`SELECT 1`;
 
-    // Final check and update if needed
+    // Final check and update if needed - try all strategies
     let finalCheckPassed = false;
     try {
-      const finalEmailCheck = await prisma.$queryRaw<
-        Array<{ id: string; email: string; passwordHash: string | null }>
-      >`
-        SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
-      `;
-
-      if (finalEmailCheck && finalEmailCheck.length > 0 && finalEmailCheck[0].id === user.id) {
+      // Strategy 1: Try Prisma findUnique by email
+      const finalPrismaCheck = await prisma.user.findUnique({
+        where: { email },
+      });
+      if (finalPrismaCheck && finalPrismaCheck.id === user.id) {
         userVisibleByEmail = true;
-        if (finalEmailCheck[0].passwordHash) {
+        if (finalPrismaCheck.passwordHash) {
           userHasPasswordHash = true;
           finalCheckPassed = true;
         } else {
           // Update password hash one more time
-          await prisma.$executeRaw`
-            UPDATE "User" SET "passwordHash" = ${expectedPasswordHash || (await bcrypt.hash('password123', 10))} WHERE id = ${user.id}
-          `;
+          const hashToUse = expectedPasswordHash || (await bcrypt.hash('password123', 10));
+          await prisma.user.update({
+            where: { id: user.id },
+            data: { passwordHash: hashToUse },
+          });
           // Small delay after update
           await new Promise((resolve) => setTimeout(resolve, 300));
           // Re-check after update
-          const recheck = await prisma.$queryRaw<
-            Array<{ id: string; email: string; passwordHash: string | null }>
-          >`
-            SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
-          `;
-          if (recheck && recheck.length > 0 && recheck[0].passwordHash) {
+          const recheck = await prisma.user.findUnique({
+            where: { email },
+          });
+          if (recheck && recheck.passwordHash) {
             userHasPasswordHash = true;
             finalCheckPassed = true;
+          }
+        }
+      }
+
+      // Strategy 2: Try raw SQL if Prisma didn't work
+      if (!finalCheckPassed) {
+        const finalEmailCheck = await prisma.$queryRaw<
+          Array<{ id: string; email: string; passwordHash: string | null }>
+        >`
+          SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
+        `;
+
+        if (finalEmailCheck && finalEmailCheck.length > 0 && finalEmailCheck[0].id === user.id) {
+          userVisibleByEmail = true;
+          if (finalEmailCheck[0].passwordHash) {
+            userHasPasswordHash = true;
+            finalCheckPassed = true;
+          } else {
+            // Update password hash one more time
+            const hashToUse = expectedPasswordHash || (await bcrypt.hash('password123', 10));
+            await prisma.$executeRaw`
+              UPDATE "User" SET "passwordHash" = ${hashToUse} WHERE id = ${user.id}
+            `;
+            // Small delay after update
+            await new Promise((resolve) => setTimeout(resolve, 300));
+            // Re-check after update
+            const recheck = await prisma.$queryRaw<
+              Array<{ id: string; email: string; passwordHash: string | null }>
+            >`
+              SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
+            `;
+            if (recheck && recheck.length > 0 && recheck[0].passwordHash) {
+              userHasPasswordHash = true;
+              finalCheckPassed = true;
+            }
           }
         }
       }
@@ -232,33 +301,54 @@ export async function createTestUserAndLogin(
     await prisma.$executeRaw`SELECT 1`;
 
     try {
-      // Verify user is visible by ID (for controllers that lookup by ID)
-      const finalCheckById = await prisma.$queryRaw<
-        Array<{ id: string; passwordHash: string | null }>
-      >`
-        SELECT id, "passwordHash" FROM "User" WHERE id = ${user.id} LIMIT 1
-      `;
-
-      // Also verify by email (for controllers that lookup by email from token)
-      const finalCheckByEmail = await prisma.$queryRaw<
-        Array<{ id: string; email: string; passwordHash: string | null }>
-      >`
-        SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
-      `;
+      // Strategy 1: Try Prisma findUnique by ID and email
+      const finalCheckById = await prisma.user.findUnique({
+        where: { id: user.id },
+      });
+      const finalCheckByEmail = await prisma.user.findUnique({
+        where: { email },
+      });
 
       // User must be visible by both ID and email, with password hash
       if (
         finalCheckById &&
-        finalCheckById.length > 0 &&
-        finalCheckById[0].id === user.id &&
-        finalCheckById[0].passwordHash &&
+        finalCheckById.id === user.id &&
+        finalCheckById.passwordHash &&
         finalCheckByEmail &&
-        finalCheckByEmail.length > 0 &&
-        finalCheckByEmail[0].id === user.id &&
-        finalCheckByEmail[0].passwordHash
+        finalCheckByEmail.id === user.id &&
+        finalCheckByEmail.passwordHash
       ) {
         finalUserCheck = true;
         break;
+      }
+
+      // Strategy 2: Try raw SQL if Prisma didn't work
+      if (!finalUserCheck) {
+        const finalCheckByIdRaw = await prisma.$queryRaw<
+          Array<{ id: string; passwordHash: string | null }>
+        >`
+          SELECT id, "passwordHash" FROM "User" WHERE id = ${user.id} LIMIT 1
+        `;
+
+        const finalCheckByEmailRaw = await prisma.$queryRaw<
+          Array<{ id: string; email: string; passwordHash: string | null }>
+        >`
+          SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
+        `;
+
+        if (
+          finalCheckByIdRaw &&
+          finalCheckByIdRaw.length > 0 &&
+          finalCheckByIdRaw[0].id === user.id &&
+          finalCheckByIdRaw[0].passwordHash &&
+          finalCheckByEmailRaw &&
+          finalCheckByEmailRaw.length > 0 &&
+          finalCheckByEmailRaw[0].id === user.id &&
+          finalCheckByEmailRaw[0].passwordHash
+        ) {
+          finalUserCheck = true;
+          break;
+        }
       }
     } catch (error) {
       // Continue to next attempt
@@ -271,32 +361,49 @@ export async function createTestUserAndLogin(
 
   // CRITICAL: Throw error if user is not visible - this function must guarantee visibility
   if (!finalUserCheck) {
-    // One final attempt with longer delay
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    // One final attempt with longer delay - try all strategies
+    await new Promise((resolve) => setTimeout(resolve, 1500));
     await prisma.$executeRaw`SELECT 1`;
 
-    const lastCheckById = await prisma.$queryRaw<
-      Array<{ id: string; passwordHash: string | null }>
-    >`
-      SELECT id, "passwordHash" FROM "User" WHERE id = ${user.id} LIMIT 1
-    `;
+    // Strategy 1: Try Prisma findUnique
+    const lastCheckById = await prisma.user.findUnique({
+      where: { id: user.id },
+    });
+    const lastCheckByEmail = await prisma.user.findUnique({
+      where: { email },
+    });
 
-    const lastCheckByEmail = await prisma.$queryRaw<
-      Array<{ id: string; email: string; passwordHash: string | null }>
-    >`
-      SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
-    `;
+    const visibleById = lastCheckById && lastCheckById.passwordHash;
+    const visibleByEmail = lastCheckByEmail && lastCheckByEmail.passwordHash;
 
-    const visibleById = lastCheckById && lastCheckById.length > 0 && lastCheckById[0].passwordHash;
-    const visibleByEmail =
-      lastCheckByEmail && lastCheckByEmail.length > 0 && lastCheckByEmail[0].passwordHash;
-
+    // Strategy 2: Try raw SQL if Prisma didn't work
     if (!visibleById || !visibleByEmail) {
-      throw new Error(
-        `createTestUserAndLogin failed: User ${email} (ID: ${user.id}) is not fully visible after login. ` +
-          `Visible by ID: ${visibleById}, Visible by Email: ${visibleByEmail}. ` +
-          `This indicates a database visibility issue that must be fixed in the helper, not with defensive checks in tests.`,
-      );
+      const lastCheckByIdRaw = await prisma.$queryRaw<
+        Array<{ id: string; passwordHash: string | null }>
+      >`
+        SELECT id, "passwordHash" FROM "User" WHERE id = ${user.id} LIMIT 1
+      `;
+
+      const lastCheckByEmailRaw = await prisma.$queryRaw<
+        Array<{ id: string; email: string; passwordHash: string | null }>
+      >`
+        SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
+      `;
+
+      const visibleByIdRaw =
+        lastCheckByIdRaw && lastCheckByIdRaw.length > 0 && lastCheckByIdRaw[0].passwordHash;
+      const visibleByEmailRaw =
+        lastCheckByEmailRaw &&
+        lastCheckByEmailRaw.length > 0 &&
+        lastCheckByEmailRaw[0].passwordHash;
+
+      if (!visibleByIdRaw || !visibleByEmailRaw) {
+        throw new Error(
+          `createTestUserAndLogin failed: User ${email} (ID: ${user.id}) is not fully visible after login. ` +
+            `Visible by ID: ${visibleByIdRaw}, Visible by Email: ${visibleByEmailRaw}. ` +
+            `This indicates a database visibility issue that must be fixed in the helper, not with defensive checks in tests.`,
+        );
+      }
     }
   }
 
@@ -370,9 +477,10 @@ export async function createTestUser(email: string, role: 'USER' | 'ADMIN' = 'US
 
     // CRITICAL: Verify user is visible by email (same query as login endpoint)
     // This ensures the user can be found when login attempts to query by email
+    // Use multiple verification strategies: Prisma findUnique, raw SQL, and findFirst
     let verifyUser = null;
     let verifyUserByEmail = null;
-    const quickVerificationAttempts = 8; // Increased for CI reliability
+    const quickVerificationAttempts = 15; // Increased for CI reliability
 
     for (let attempt = 0; attempt < quickVerificationAttempts; attempt++) {
       if (attempt > 0) {
@@ -384,46 +492,87 @@ export async function createTestUser(email: string, role: 'USER' | 'ADMIN' = 'US
       await prisma.$executeRaw`SELECT 1`;
 
       try {
-        // Query by ID - most reliable since we have the exact ID from upsert
-        const idResult = await prisma.$queryRaw<
-          Array<{ id: string; email: string; passwordHash: string | null }>
-        >`
-          SELECT id, email, "passwordHash" FROM "User" WHERE id = ${user.id} LIMIT 1
-        `;
-
-        if (idResult && idResult.length > 0) {
-          verifyUser = idResult[0];
+        // Strategy 1: Try Prisma findUnique by ID first
+        const prismaCheckById = await prisma.user.findUnique({
+          where: { id: user.id },
+        });
+        if (prismaCheckById && prismaCheckById.id === user.id) {
+          verifyUser = {
+            id: prismaCheckById.id,
+            email: prismaCheckById.email,
+            passwordHash: prismaCheckById.passwordHash,
+          };
         }
 
-        // CRITICAL: Also verify by email (same as login endpoint)
-        const emailResult = await prisma.$queryRaw<
-          Array<{ id: string; email: string; passwordHash: string | null }>
-        >`
-          SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
-        `;
+        // Strategy 2: Try Prisma findUnique by email (same as login endpoint)
+        const prismaCheckByEmail = await prisma.user.findUnique({
+          where: { email },
+        });
+        if (prismaCheckByEmail && prismaCheckByEmail.id === user.id) {
+          verifyUserByEmail = {
+            id: prismaCheckByEmail.id,
+            email: prismaCheckByEmail.email,
+            passwordHash: prismaCheckByEmail.passwordHash,
+          };
+        }
 
-        if (emailResult && emailResult.length > 0 && emailResult[0].id === user.id) {
-          verifyUserByEmail = emailResult[0];
-          // Verify password hash is set
-          if (!verifyUserByEmail.passwordHash) {
-            // Password hash missing - update it
-            await prisma.user.update({
-              where: { id: user.id },
-              data: { passwordHash },
-            });
-            // Re-query to get updated user
+        // Strategy 3: Try raw SQL query by ID (bypasses some caching)
+        if (!verifyUser) {
+          const idResult = await prisma.$queryRaw<
+            Array<{ id: string; email: string; passwordHash: string | null }>
+          >`
+            SELECT id, email, "passwordHash" FROM "User" WHERE id = ${user.id} LIMIT 1
+          `;
+
+          if (idResult && idResult.length > 0) {
+            verifyUser = idResult[0];
+          }
+        }
+
+        // Strategy 4: Try raw SQL query by email (same as login endpoint)
+        if (!verifyUserByEmail) {
+          const emailResult = await prisma.$queryRaw<
+            Array<{ id: string; email: string; passwordHash: string | null }>
+          >`
+            SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
+          `;
+
+          if (emailResult && emailResult.length > 0 && emailResult[0].id === user.id) {
+            verifyUserByEmail = emailResult[0];
+          }
+        }
+
+        // Verify password hash is set for email check (critical for login)
+        if (verifyUserByEmail && !verifyUserByEmail.passwordHash) {
+          // Password hash missing - update it
+          await prisma.user.update({
+            where: { id: user.id },
+            data: { passwordHash },
+          });
+          // Re-query to get updated user using all strategies
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          const recheckPrisma = await prisma.user.findUnique({
+            where: { email },
+          });
+          if (recheckPrisma && recheckPrisma.passwordHash) {
+            verifyUserByEmail = {
+              id: recheckPrisma.id,
+              email: recheckPrisma.email,
+              passwordHash: recheckPrisma.passwordHash,
+            };
+          } else {
             const recheck = await prisma.$queryRaw<
               Array<{ id: string; email: string; passwordHash: string | null }>
             >`
               SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
             `;
-            if (recheck && recheck.length > 0) {
+            if (recheck && recheck.length > 0 && recheck[0].passwordHash) {
               verifyUserByEmail = recheck[0];
             }
           }
         }
 
-        // If both verifications pass, we're good
+        // If both verifications pass with password hash, we're good
         if (verifyUser && verifyUserByEmail && verifyUserByEmail.passwordHash) {
           break;
         }
@@ -435,42 +584,86 @@ export async function createTestUser(email: string, role: 'USER' | 'ADMIN' = 'US
       }
     }
 
-    // If verification failed, add extra delay and try one more time
+    // If verification failed, add extra delay and try one more time with all strategies
     if (!verifyUserByEmail || !verifyUserByEmail.passwordHash) {
       // Force connection refresh
       await prisma.$executeRaw`SELECT 1`;
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      await new Promise((resolve) => setTimeout(resolve, 1000));
 
-      // Final attempt: ensure password hash is set using raw SQL to force connection refresh
+      // Final attempt: try all strategies one more time
       try {
-        // Use raw SQL to force a fresh connection and check user
-        const finalCheckRaw = await prisma.$queryRaw<
-          Array<{ id: string; email: string; passwordHash: string | null }>
-        >`
-          SELECT id, email, "passwordHash" FROM "User" WHERE id = ${user.id} LIMIT 1
-        `;
-
-        if (finalCheckRaw && finalCheckRaw.length > 0) {
-          const finalUser = finalCheckRaw[0];
-          if (!finalUser.passwordHash) {
-            // Update password hash using raw SQL
-            await prisma.$executeRaw`
-              UPDATE "User" SET "passwordHash" = ${passwordHash} WHERE id = ${user.id}
-            `;
+        // Strategy 1: Try Prisma findUnique by email
+        const finalPrismaCheck = await prisma.user.findUnique({
+          where: { email },
+        });
+        if (finalPrismaCheck && finalPrismaCheck.id === user.id) {
+          if (finalPrismaCheck.passwordHash) {
+            verifyUserByEmail = {
+              id: finalPrismaCheck.id,
+              email: finalPrismaCheck.email,
+              passwordHash: finalPrismaCheck.passwordHash,
+            };
+          } else {
+            // Update password hash
+            await prisma.user.update({
+              where: { id: user.id },
+              data: { passwordHash },
+            });
+            // Re-check
+            const recheck = await prisma.user.findUnique({
+              where: { email },
+            });
+            if (recheck && recheck.passwordHash) {
+              verifyUserByEmail = {
+                id: recheck.id,
+                email: recheck.email,
+                passwordHash: recheck.passwordHash,
+              };
+            }
           }
-        } else {
-          // User not visible yet, but upsert succeeded - trust the upsert result
-          // Ensure password hash is set anyway using raw SQL
-          try {
-            await prisma.$executeRaw`
-              UPDATE "User" SET "passwordHash" = ${passwordHash} WHERE id = ${user.id}
-            `;
-          } catch {
-            // If update fails, user might not be visible yet - this is OK, upsert already set it
-            if (process.env.NODE_ENV === 'development') {
-              console.warn(
-                `Could not verify/update password hash for ${email} (ID: ${user.id}), but upsert succeeded`,
-              );
+        }
+
+        // Strategy 2: Try raw SQL if Prisma didn't work
+        if (!verifyUserByEmail || !verifyUserByEmail.passwordHash) {
+          const finalCheckRaw = await prisma.$queryRaw<
+            Array<{ id: string; email: string; passwordHash: string | null }>
+          >`
+            SELECT id, email, "passwordHash" FROM "User" WHERE id = ${user.id} LIMIT 1
+          `;
+
+          if (finalCheckRaw && finalCheckRaw.length > 0) {
+            const finalUser = finalCheckRaw[0];
+            if (!finalUser.passwordHash) {
+              // Update password hash using raw SQL
+              await prisma.$executeRaw`
+                UPDATE "User" SET "passwordHash" = ${passwordHash} WHERE id = ${user.id}
+              `;
+              // Re-check after update
+              await new Promise((resolve) => setTimeout(resolve, 300));
+              const recheckRaw = await prisma.$queryRaw<
+                Array<{ id: string; email: string; passwordHash: string | null }>
+              >`
+                SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
+              `;
+              if (recheckRaw && recheckRaw.length > 0 && recheckRaw[0].passwordHash) {
+                verifyUserByEmail = recheckRaw[0];
+              }
+            } else {
+              verifyUserByEmail = finalUser;
+            }
+          } else {
+            // User not visible yet, but upsert succeeded - ensure password hash is set anyway
+            try {
+              await prisma.$executeRaw`
+                UPDATE "User" SET "passwordHash" = ${passwordHash} WHERE id = ${user.id}
+              `;
+            } catch {
+              // If update fails, user might not be visible yet - this is OK, upsert already set it
+              if (process.env.NODE_ENV === 'development') {
+                console.warn(
+                  `Could not verify/update password hash for ${email} (ID: ${user.id}), but upsert succeeded`,
+                );
+              }
             }
           }
         }
@@ -524,19 +717,12 @@ export async function createTestCategory(name: string, slug?: string) {
       throw new Error(`Failed to create/update category with slug ${categorySlug}`);
     }
 
-    // Force connection refresh by executing queries to cycle through connection pool
-    // This helps ensure subsequent queries use a fresh connection
-    await prisma.$executeRaw`SELECT 1`;
-
-    // Delay to ensure commit is visible - upsert is atomic and commits immediately
-    // Increased delay for CI environments where connection pool visibility can be slower
-    await new Promise((resolve) => setTimeout(resolve, 400));
-
     // CRITICAL: Verify category is visible - this function must guarantee visibility
     // This prevents FK violations when creating products that reference this category
+    // Use multiple verification strategies: raw SQL, Prisma findUnique, and findFirst
     const verificationStartTime = Date.now();
-    const verificationTimeoutMs = 10000; // 10 seconds for verification
-    const verificationMaxAttempts = 20; // More attempts for reliability
+    const verificationTimeoutMs = 15000; // 15 seconds for verification (increased for CI)
+    const verificationMaxAttempts = 30; // More attempts for reliability
     let verifyCategory = null;
 
     for (let attempt = 0; attempt < verificationMaxAttempts; attempt++) {
@@ -554,13 +740,31 @@ export async function createTestCategory(name: string, slug?: string) {
       await prisma.$executeRaw`SELECT 1`;
 
       try {
-        // Query by ID - most reliable since we have the exact ID from upsert
+        // Strategy 1: Try Prisma findUnique first (uses connection pool)
+        const prismaCheck = await prisma.category.findUnique({
+          where: { id: category.id },
+        });
+        if (prismaCheck && prismaCheck.id === category.id) {
+          verifyCategory = prismaCheck;
+          break;
+        }
+
+        // Strategy 2: Try raw SQL query (bypasses some caching)
         const idResult = await prisma.$queryRaw<Array<{ id: string; name: string; slug: string }>>`
           SELECT id, name, slug FROM "Category" WHERE id = ${category.id} LIMIT 1
         `;
 
         if (idResult && idResult.length > 0 && idResult[0].id === category.id) {
-          verifyCategory = idResult[0];
+          verifyCategory = { id: idResult[0].id, name: idResult[0].name, slug: idResult[0].slug };
+          break;
+        }
+
+        // Strategy 3: Try findFirst by slug as fallback
+        const slugCheck = await prisma.category.findFirst({
+          where: { slug: categorySlug },
+        });
+        if (slugCheck && slugCheck.id === category.id) {
+          verifyCategory = slugCheck;
           break;
         }
       } catch (error) {
@@ -573,9 +777,17 @@ export async function createTestCategory(name: string, slug?: string) {
 
     // CRITICAL: Throw error if category is not visible - this function must guarantee visibility
     if (!verifyCategory) {
-      // One final attempt with longer delay
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      // One final attempt with longer delay and all strategies
+      await new Promise((resolve) => setTimeout(resolve, 1500));
       await prisma.$executeRaw`SELECT 1`;
+
+      // Try all strategies one more time
+      const finalPrismaCheck = await prisma.category.findUnique({
+        where: { id: category.id },
+      });
+      if (finalPrismaCheck && finalPrismaCheck.id === category.id) {
+        return category;
+      }
 
       const lastCheck = await prisma.$queryRaw<Array<{ id: string; name: string; slug: string }>>`
         SELECT id, name, slug FROM "Category" WHERE id = ${category.id} LIMIT 1
@@ -708,9 +920,10 @@ export async function createTestProduct(
 
   // CRITICAL: Verify product is visible - this function must guarantee visibility
   // This prevents FK violations when creating orders/reviews that reference this product
+  // Use multiple verification strategies: raw SQL, Prisma findUnique, and findFirst
   const productVerificationStartTime = Date.now();
-  const productVerificationTimeoutMs = 10000; // 10 seconds for verification
-  const productVerificationMaxAttempts = 20; // More attempts for reliability
+  const productVerificationTimeoutMs = 15000; // 15 seconds for verification (increased for CI)
+  const productVerificationMaxAttempts = 30; // More attempts for reliability
   let verifyProduct = null;
 
   for (let attempt = 0; attempt < productVerificationMaxAttempts; attempt++) {
@@ -728,13 +941,35 @@ export async function createTestProduct(
     await prisma.$executeRaw`SELECT 1`;
 
     try {
-      // Query by ID - most reliable since we have the exact ID from create
+      // Strategy 1: Try Prisma findUnique first (uses connection pool)
+      const prismaCheck = await prisma.product.findUnique({
+        where: { id: product.id },
+      });
+      if (prismaCheck && prismaCheck.id === product.id) {
+        verifyProduct = prismaCheck;
+        break;
+      }
+
+      // Strategy 2: Try raw SQL query (bypasses some caching)
       const idResult = await prisma.$queryRaw<Array<{ id: string; title: string; slug: string }>>`
         SELECT id, title, slug FROM "Product" WHERE id = ${product.id} LIMIT 1
       `;
 
       if (idResult && idResult.length > 0 && idResult[0].id === product.id) {
-        verifyProduct = idResult[0];
+        verifyProduct = {
+          id: idResult[0].id,
+          title: idResult[0].title,
+          slug: idResult[0].slug,
+        };
+        break;
+      }
+
+      // Strategy 3: Try findFirst by slug as fallback
+      const slugCheck = await prisma.product.findFirst({
+        where: { slug: uniqueSlug },
+      });
+      if (slugCheck && slugCheck.id === product.id) {
+        verifyProduct = slugCheck;
         break;
       }
     } catch (error) {
@@ -747,9 +982,17 @@ export async function createTestProduct(
 
   // CRITICAL: Throw error if product is not visible - this function must guarantee visibility
   if (!verifyProduct) {
-    // One final attempt with longer delay
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    // One final attempt with longer delay and all strategies
+    await new Promise((resolve) => setTimeout(resolve, 1500));
     await prisma.$executeRaw`SELECT 1`;
+
+    // Try all strategies one more time
+    const finalPrismaCheck = await prisma.product.findUnique({
+      where: { id: product.id },
+    });
+    if (finalPrismaCheck && finalPrismaCheck.id === product.id) {
+      return product;
+    }
 
     const lastCheck = await prisma.$queryRaw<Array<{ id: string; title: string; slug: string }>>`
       SELECT id, title, slug FROM "Product" WHERE id = ${product.id} LIMIT 1
