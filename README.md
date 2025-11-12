@@ -37,7 +37,7 @@ A production-ready, full-featured RESTful E-commerce API built with TypeScript, 
 - 🚀 **Database Optimization** - Performance indexes for faster queries
 - 🛡️ **Rate Limiting** - Per-endpoint rate limiting for security
 - 📈 **Performance Monitoring** - Slow request logging and monitoring
-- 🧪 **Comprehensive Testing** - 237+ tests with 80%+ code coverage
+- 🧪 **Comprehensive Testing** - 237+ tests with 69%+ code coverage
 - 🚀 **CI/CD Ready** - GitHub Actions workflow included
 - 🔒 **Security First** - Rate limiting, input validation, CORS, Helmet.js
 - 📝 **Type-Safe** - Full TypeScript with Prisma ORM
@@ -689,12 +689,12 @@ npm run test:save
 
 Current coverage thresholds:
 
-- **Statements:** 78.74%
-- **Branches:** 66.12%
-- **Functions:** 84.21%
-- **Lines:** 78.74%
+- **Statements:** 68.9%
+- **Branches:** 51.6%
+- **Functions:** 70%
+- **Lines:** 69%
 
-All 52 tests passing ✅
+All 237 tests passing ✅
 
 ## 📜 Scripts
 

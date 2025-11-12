@@ -21,7 +21,7 @@ describe('Order Status Tracking', () => {
 
   beforeEach(async () => {
     await cleanupDatabase();
-    
+
     // Create users and get tokens using helper
     const userResult = await createTestUserAndLogin(app, 'user@example.com', 'USER');
     userToken = userResult.token;
@@ -42,18 +42,18 @@ describe('Order Status Tracking', () => {
         // Wait longer between retries to ensure user is visible
         await new Promise((resolve) => setTimeout(resolve, 300 * attempt));
       }
-      
+
       orderRes = await request(app)
         .post('/api/v1/orders')
         .set('Authorization', `Bearer ${userToken}`)
         .send({
           items: [{ productId, quantity: 2 }],
         });
-      
+
       if (orderRes.status === 201 && orderRes.body?.order?.id) {
         break;
       }
-      
+
       // If it's a 500 error with FK violation, retry
       if (orderRes.status === 500 && attempt < 4) {
         continue;

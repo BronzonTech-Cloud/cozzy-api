@@ -12,13 +12,16 @@ describe('Coupons', () => {
 
   beforeEach(async () => {
     await cleanupDatabase();
-    
+
     // Create users and get tokens, ensuring login succeeds
     const adminResult = await createTestUserAndLogin(app, 'admin@example.com', 'ADMIN');
     adminToken = adminResult.token;
 
     const userResult = await createTestUserAndLogin(app, 'user@example.com', 'USER');
     userToken = userResult.token;
+
+    // Small delay to ensure users are fully visible before test operations
+    await new Promise((resolve) => setTimeout(resolve, 100));
 
     // Verify tokens are set
     if (!adminToken || !userToken) {

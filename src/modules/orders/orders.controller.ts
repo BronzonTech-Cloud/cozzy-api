@@ -71,52 +71,52 @@ export async function createOrder(req: Request, res: Response) {
       }
 
       const totalCents = subtotalCents - discountCents;
-    const order = await tx.order.create({
-      data: {
-        userId,
-        status: 'PENDING',
-        totalCents,
-        currency: currency || 'USD',
-        itemsCount,
-        paymentProvider: 'STRIPE',
-        couponId: appliedCouponId,
-        discountCents,
-      },
-    });
-
-    // Create initial status history entry
-    await tx.orderStatusHistory.create({
-      data: {
-        orderId: order.id,
-        status: 'PENDING',
-        note: 'Order created',
-      },
-    });
-
-    for (const item of items) {
-      const product = idToProduct.get(item.productId)!;
-      await tx.orderItem.create({
+      const order = await tx.order.create({
         data: {
-          orderId: order.id,
-          productId: product.id,
-          quantity: item.quantity,
-          unitPriceCents: product.priceCents,
-          subtotalCents: product.priceCents * item.quantity,
+          userId,
+          status: 'PENDING',
+          totalCents,
+          currency: currency || 'USD',
+          itemsCount,
+          paymentProvider: 'STRIPE',
+          couponId: appliedCouponId,
+          discountCents,
         },
       });
-      await tx.product.update({
-        where: { id: product.id },
-        data: { stock: { decrement: item.quantity } },
-      });
-    }
 
-    // Increment coupon usage count if coupon was applied
-    if (appliedCouponId) {
-      await tx.coupon.update({
-        where: { id: appliedCouponId },
-        data: { usageCount: { increment: 1 } },
+      // Create initial status history entry
+      await tx.orderStatusHistory.create({
+        data: {
+          orderId: order.id,
+          status: 'PENDING',
+          note: 'Order created',
+        },
       });
-    }
+
+      for (const item of items) {
+        const product = idToProduct.get(item.productId)!;
+        await tx.orderItem.create({
+          data: {
+            orderId: order.id,
+            productId: product.id,
+            quantity: item.quantity,
+            unitPriceCents: product.priceCents,
+            subtotalCents: product.priceCents * item.quantity,
+          },
+        });
+        await tx.product.update({
+          where: { id: product.id },
+          data: { stock: { decrement: item.quantity } },
+        });
+      }
+
+      // Increment coupon usage count if coupon was applied
+      if (appliedCouponId) {
+        await tx.coupon.update({
+          where: { id: appliedCouponId },
+          data: { usageCount: { increment: 1 } },
+        });
+      }
 
       return order;
     });
@@ -143,7 +143,10 @@ export async function createOrder(req: Request, res: Response) {
       }
     }
     // Re-throw unexpected errors to be handled by error middleware
-    console.error('Error in createOrder:', error instanceof Error ? error.message : 'Unknown error');
+    console.error(
+      'Error in createOrder:',
+      error instanceof Error ? error.message : 'Unknown error',
+    );
     throw error;
   }
 }

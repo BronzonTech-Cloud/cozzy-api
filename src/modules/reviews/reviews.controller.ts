@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 
 import { prisma } from '../../config/prisma';
+import { handlePrismaError } from '../../utils/prisma-errors';
 import { CreateReviewInput, UpdateReviewInput } from './reviews.schema';
 
 /**
@@ -219,28 +220,37 @@ export async function updateReview(req: Request, res: Response) {
   }
 
   // Update review
-  const updatedReview = await prisma.review.update({
-    where: { id: reviewId },
-    data: body,
-    include: {
-      user: {
-        select: {
-          id: true,
-          name: true,
-          email: true,
+  try {
+    const updatedReview = await prisma.review.update({
+      where: { id: reviewId },
+      data: body,
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+        product: {
+          select: {
+            id: true,
+            title: true,
+            slug: true,
+          },
         },
       },
-      product: {
-        select: {
-          id: true,
-          title: true,
-          slug: true,
-        },
-      },
-    },
-  });
+    });
 
-  res.json({ review: updatedReview });
+    res.json({ review: updatedReview });
+  } catch (error) {
+    // Handle Prisma errors
+    if (handlePrismaError(error, res)) {
+      return;
+    }
+    // Fallback for unexpected errors
+    res.status(500).json({ message: 'Internal server error' });
+  }
 }
 
 /**
@@ -266,9 +276,18 @@ export async function deleteReview(req: Request, res: Response) {
   }
 
   // Delete review
-  await prisma.review.delete({
-    where: { id: reviewId },
-  });
+  try {
+    await prisma.review.delete({
+      where: { id: reviewId },
+    });
 
-  res.status(204).send();
+    res.status(204).send();
+  } catch (error) {
+    // Handle Prisma errors
+    if (handlePrismaError(error, res)) {
+      return;
+    }
+    // Fallback for unexpected errors
+    res.status(500).json({ message: 'Internal server error' });
+  }
 }

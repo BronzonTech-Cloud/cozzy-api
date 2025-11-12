@@ -19,7 +19,7 @@ describe('Orders', () => {
 
   beforeEach(async () => {
     await cleanupDatabase();
-    
+
     // Create users and get tokens using helper
     const userResult = await createTestUserAndLogin(app, 'user@example.com', 'USER');
     userToken = userResult.token;
@@ -92,7 +92,7 @@ describe('Orders', () => {
         .send({
           items: [{ productId, quantity: 1 }],
         });
-      
+
       // If order creation failed, skip this test
       if (createRes.status !== 201) {
         console.warn('Order creation failed in test, skipping:', createRes.body);

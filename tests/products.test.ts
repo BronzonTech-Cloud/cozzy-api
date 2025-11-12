@@ -17,13 +17,19 @@ describe('Products', () => {
 
   beforeEach(async () => {
     await cleanupDatabase();
-    
+
     // Create admin user and get token using helper
     const adminResult = await createTestUserAndLogin(app, 'admin@example.com', 'ADMIN');
     adminToken = adminResult.token;
 
+    // Small delay to ensure user is fully visible before creating category
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
     const category = await createTestCategory('Electronics');
     categoryId = category.id;
+
+    // Small delay to ensure category is fully visible before creating products
+    await new Promise((resolve) => setTimeout(resolve, 100));
   });
 
   describe('GET /api/v1/products', () => {

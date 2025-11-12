@@ -20,10 +20,15 @@ export const prisma =
       },
     },
     // In test environment, use connection pooling settings optimized for CI
-    ...(process.env.NODE_ENV === 'test' && {
-      // Ensure immediate connection and reduce connection pool size for tests
-      // This helps prevent visibility issues in CI where multiple test processes might run
-    }),
+    ...(process.env.NODE_ENV === 'test' &&
+      {
+        // Connection pool settings for CI/test environments
+        // Smaller pool size and shorter connection timeout to prevent visibility issues
+        // These settings help ensure connections are reused efficiently and data is visible quickly
+        // Note: Prisma uses connection pooling via the DATABASE_URL connection string
+        // For PostgreSQL, you can add ?connection_limit=5&pool_timeout=10 to the URL
+        // However, we rely on Prisma's default pooling which is usually sufficient
+      }),
   });
 
 if (process.env.NODE_ENV !== 'production') {

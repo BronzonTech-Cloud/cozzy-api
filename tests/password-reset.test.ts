@@ -99,13 +99,13 @@ describe('Password Reset', () => {
         if (attempt > 0) {
           await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
         }
-        
+
         user = await prisma.user.findUnique({ where: { id: userId } });
         if (user?.resetPasswordToken) {
           break;
         }
       }
-      
+
       if (!user?.resetPasswordToken) {
         throw new Error('Reset token not found after retries');
       }

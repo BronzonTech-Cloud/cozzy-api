@@ -22,7 +22,7 @@ describe('Reviews', () => {
 
   beforeEach(async () => {
     await cleanupDatabase();
-    
+
     // Create users and get tokens using helper
     const userResult = await createTestUserAndLogin(app, 'user@example.com', 'USER');
     userToken = userResult.token;
@@ -384,13 +384,13 @@ describe('Reviews', () => {
         if (attempt > 0) {
           await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
         }
-        
+
         user = await prisma.user.findUnique({ where: { email: 'user@example.com' } });
         if (user) {
           break;
         }
       }
-      
+
       if (!user) {
         throw new Error('Test user not found. Ensure beforeEach creates the user.');
       }

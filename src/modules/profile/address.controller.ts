@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 
 import { prisma } from '../../config/prisma';
+import { handlePrismaError } from '../../utils/prisma-errors';
 import { createAddressSchema, updateAddressSchema } from './address.schema';
 
 export async function getAddresses(req: Request, res: Response) {
@@ -85,7 +86,10 @@ export async function updateAddress(req: Request, res: Response) {
     const updateData: Record<string, unknown> = {};
     const bodyKeys = Object.keys(req.body);
     for (const key of bodyKeys) {
-      if (key in validationResult.data && validationResult.data[key as keyof typeof validationResult.data] !== undefined) {
+      if (
+        key in validationResult.data &&
+        validationResult.data[key as keyof typeof validationResult.data] !== undefined
+      ) {
         updateData[key] = validationResult.data[key as keyof typeof validationResult.data];
       }
     }
@@ -128,6 +132,11 @@ export async function updateAddress(req: Request, res: Response) {
       return res.status(404).json({ message: 'Address not found' });
     }
 
+    // Handle Prisma errors
+    if (handlePrismaError(error, res)) {
+      return;
+    }
+
     console.error(
       'Error in updateAddress:',
       error instanceof Error ? error.message : 'Unknown error',
@@ -153,6 +162,10 @@ export async function deleteAddress(req: Request, res: Response) {
 
     return res.json({ message: 'Address deleted successfully' });
   } catch (error) {
+    // Handle Prisma errors
+    if (handlePrismaError(error, res)) {
+      return;
+    }
     console.error(
       'Error in deleteAddress:',
       error instanceof Error ? error.message : 'Unknown error',

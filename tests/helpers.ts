@@ -8,7 +8,10 @@ import { prisma } from '../src/config/prisma';
 const VERIFICATION_MAX_RETRIES = parseInt(process.env.TEST_VERIFICATION_MAX_RETRIES || '15', 10);
 const VERIFICATION_TIMEOUT_MS = parseInt(process.env.TEST_VERIFICATION_TIMEOUT_MS || '30000', 10); // 30 seconds default
 const LOGIN_MAX_RETRIES = parseInt(process.env.TEST_LOGIN_MAX_RETRIES || '10', 10);
-const CATEGORY_VERIFICATION_MAX_RETRIES = parseInt(process.env.TEST_CATEGORY_VERIFICATION_MAX_RETRIES || '15', 10);
+const CATEGORY_VERIFICATION_MAX_RETRIES = parseInt(
+  process.env.TEST_CATEGORY_VERIFICATION_MAX_RETRIES || '15',
+  10,
+);
 
 /**
  * Helper to create a test user and get their auth token
@@ -34,24 +37,24 @@ export async function createTestUserAndLogin(
   const visibilityTimeoutMs = 10000; // 10 seconds max wait
   let userVisibleByEmail = false;
   const maxVisibilityAttempts = 20; // Increased attempts for CI reliability
-  
+
   for (let attempt = 0; attempt < maxVisibilityAttempts; attempt++) {
     // Check timeout
     if (Date.now() - visibilityStartTime > visibilityTimeoutMs) {
       break;
     }
-    
+
     if (attempt > 0) {
       // Exponential backoff: 100ms, 200ms, 300ms, etc.
       await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
     }
-    
+
     try {
       // Query by email (same as login endpoint) to ensure user is visible
       const emailCheck = await prisma.$queryRaw<Array<{ id: string; email: string }>>`
         SELECT id, email FROM "User" WHERE email = ${email} LIMIT 1
       `;
-      
+
       if (emailCheck && emailCheck.length > 0 && emailCheck[0].id === user.id) {
         userVisibleByEmail = true;
         break;
@@ -60,18 +63,18 @@ export async function createTestUserAndLogin(
       // Continue to next attempt
     }
   }
-  
+
   // If user still not visible by email, add extra delay and try one more time
   // This is critical because login will fail if user isn't visible
   if (!userVisibleByEmail) {
     await new Promise((resolve) => setTimeout(resolve, 1000));
-    
+
     // Final check
     try {
       const finalEmailCheck = await prisma.$queryRaw<Array<{ id: string; email: string }>>`
         SELECT id, email FROM "User" WHERE email = ${email} LIMIT 1
       `;
-      
+
       if (finalEmailCheck && finalEmailCheck.length > 0 && finalEmailCheck[0].id === user.id) {
         userVisibleByEmail = true;
       }
@@ -79,10 +82,12 @@ export async function createTestUserAndLogin(
       // Continue - will fail during login attempt
     }
   }
-  
+
   // If user is still not visible, log warning but proceed (will fail during login with clear error)
   if (!userVisibleByEmail && process.env.NODE_ENV === 'development') {
-    console.warn(`User ${email} (ID: ${user.id}) not visible by email after ${maxVisibilityAttempts} attempts. Proceeding with login attempt...`);
+    console.warn(
+      `User ${email} (ID: ${user.id}) not visible by email after ${maxVisibilityAttempts} attempts. Proceeding with login attempt...`,
+    );
   }
 
   // Retry login with exponential backoff (handles timing issues in CI)
@@ -91,7 +96,7 @@ export async function createTestUserAndLogin(
   const loginTimeoutMs = VERIFICATION_TIMEOUT_MS; // Use same timeout as verification
   let loginRes = null;
   const loginMaxRetries = LOGIN_MAX_RETRIES;
-  
+
   for (let attempt = 0; attempt < loginMaxRetries; attempt++) {
     // Check timeout
     if (Date.now() - loginStartTime > loginTimeoutMs) {
@@ -101,12 +106,12 @@ export async function createTestUserAndLogin(
       // Exponential backoff: 100ms, 200ms, 300ms, 400ms, 500ms, etc.
       await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
     }
-    
+
     loginRes = await request(app).post('/api/v1/auth/login').send({
       email,
       password: 'password123',
     });
-    
+
     if (loginRes.status === 200 && loginRes.body.accessToken) {
       break;
     }
@@ -115,11 +120,13 @@ export async function createTestUserAndLogin(
   // Verify login succeeded
   if (!loginRes || loginRes.status !== 200) {
     // Additional debugging: check if user exists using raw query (by email, same as login)
-    const debugResult = await prisma.$queryRaw<Array<{ id: string; email: string; passwordHash: string | null }>>`
+    const debugResult = await prisma.$queryRaw<
+      Array<{ id: string; email: string; passwordHash: string | null }>
+    >`
       SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
     `;
     const debugUser = debugResult && debugResult.length > 0 ? debugResult[0] : null;
-    
+
     // More detailed error message
     const errorDetails = {
       status: loginRes?.status || 'no response',
@@ -130,7 +137,7 @@ export async function createTestUserAndLogin(
       userHasPassword: !!debugUser?.passwordHash,
       userVisibleByEmail: userVisibleByEmail,
     };
-    
+
     throw new Error(
       `Login failed for ${email}: ${loginRes?.status || 'no response'} - ${JSON.stringify(loginRes?.body || {})}. Debug: ${JSON.stringify(errorDetails)}`,
     );
@@ -144,18 +151,18 @@ export async function createTestUserAndLogin(
   // This prevents 404 errors in controllers that do user lookups
   // Add a small delay and verify one more time
   await new Promise((resolve) => setTimeout(resolve, 200));
-  
+
   let finalUserCheck = false;
   for (let attempt = 0; attempt < 3; attempt++) {
     if (attempt > 0) {
       await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
     }
-    
+
     try {
       const finalCheck = await prisma.$queryRaw<Array<{ id: string }>>`
         SELECT id FROM "User" WHERE id = ${user.id} LIMIT 1
       `;
-      
+
       if (finalCheck && finalCheck.length > 0) {
         finalUserCheck = true;
         break;
@@ -164,7 +171,7 @@ export async function createTestUserAndLogin(
       // Continue
     }
   }
-  
+
   // If still not visible, add one more delay (user exists, just not visible yet)
   if (!finalUserCheck) {
     await new Promise((resolve) => setTimeout(resolve, 300));
@@ -180,7 +187,7 @@ export async function createTestUser(email: string, role: 'USER' | 'ADMIN' = 'US
   // Use upsert to atomically create or update user, avoiding unique constraint violations
   // This is more reliable than delete-then-create, especially in CI environments
   const passwordHash = await bcrypt.hash('password123', 10);
-  
+
   try {
     // Direct upsert (no transaction wrapper) - upsert is already atomic
     // Transaction wrappers can cause visibility issues across connection pools in CI
@@ -199,37 +206,37 @@ export async function createTestUser(email: string, role: 'USER' | 'ADMIN' = 'US
         role,
       },
     });
-    
+
     // Verify user was created/updated
     if (!user || !user.id) {
       throw new Error(`Failed to create/update user with email ${email}`);
     }
-    
+
     // Force connection refresh by executing queries to cycle through connection pool
     // This helps ensure subsequent queries use a fresh connection
     await prisma.$executeRaw`SELECT 1`;
-    
+
     // Delay to ensure commit is visible - upsert is atomic and commits immediately
     // Increased delay for CI environments where connection pool visibility can be slower
     await new Promise((resolve) => setTimeout(resolve, 400));
-    
+
     // Lightweight verification: try to find the user by ID (most reliable)
     // If this fails, we still return the user object from upsert (trust the operation)
     // The verification is just a sanity check, not a hard requirement
     let verifyUser = null;
     const quickVerificationAttempts = 5; // Increased for CI reliability
-    
+
     for (let attempt = 0; attempt < quickVerificationAttempts; attempt++) {
       if (attempt > 0) {
         await new Promise((resolve) => setTimeout(resolve, 150 * attempt));
       }
-      
+
       try {
         // Query by ID - most reliable since we have the exact ID from upsert
         const idResult = await prisma.$queryRaw<Array<{ id: string; email: string }>>`
           SELECT id, email FROM "User" WHERE id = ${user.id} LIMIT 1
         `;
-        
+
         if (idResult && idResult.length > 0) {
           verifyUser = idResult[0];
           break;
@@ -238,7 +245,7 @@ export async function createTestUser(email: string, role: 'USER' | 'ADMIN' = 'US
         // Continue to next attempt
       }
     }
-    
+
     // Even if verification fails, trust the upsert result and return the user
     // The upsert operation is atomic and returns the created/updated record
     // If verification fails, it's likely a connection pool visibility issue, not a real problem
@@ -246,10 +253,12 @@ export async function createTestUser(email: string, role: 'USER' | 'ADMIN' = 'US
     if (!verifyUser) {
       await new Promise((resolve) => setTimeout(resolve, 300));
       if (process.env.NODE_ENV === 'development') {
-        console.warn(`User ${email} verification failed, but returning user from upsert (ID: ${user.id})`);
+        console.warn(
+          `User ${email} verification failed, but returning user from upsert (ID: ${user.id})`,
+        );
       }
     }
-    
+
     return user;
   } catch (error) {
     console.error(`Error creating test user ${email}:`, error);
@@ -259,7 +268,7 @@ export async function createTestUser(email: string, role: 'USER' | 'ADMIN' = 'US
 
 export async function createTestCategory(name: string, slug?: string) {
   const categorySlug = slug || name.toLowerCase();
-  
+
   // Categories have unique constraints on both name and slug
   // Use upsert to atomically create or update category, avoiding unique constraint violations
   // This is safer than delete-then-create because:
@@ -280,37 +289,37 @@ export async function createTestCategory(name: string, slug?: string) {
         slug: categorySlug,
       },
     });
-    
+
     // Verify category was created/updated
     if (!category || !category.id) {
       throw new Error(`Failed to create/update category with slug ${categorySlug}`);
     }
-    
+
     // Force connection refresh by executing queries to cycle through connection pool
     // This helps ensure subsequent queries use a fresh connection
     await prisma.$executeRaw`SELECT 1`;
-    
+
     // Delay to ensure commit is visible - upsert is atomic and commits immediately
     // Increased delay for CI environments where connection pool visibility can be slower
     await new Promise((resolve) => setTimeout(resolve, 400));
-    
+
     // Lightweight verification: try to find the category by ID (most reliable)
     // If this fails, we still return the category object from upsert (trust the operation)
     // The verification is just a sanity check, not a hard requirement
     let verifyCategory = null;
     const quickVerificationAttempts = 5; // Increased for CI reliability
-    
+
     for (let attempt = 0; attempt < quickVerificationAttempts; attempt++) {
       if (attempt > 0) {
         await new Promise((resolve) => setTimeout(resolve, 150 * attempt));
       }
-      
+
       try {
         // Query by ID - most reliable since we have the exact ID from upsert
         const idResult = await prisma.$queryRaw<Array<{ id: string; name: string; slug: string }>>`
           SELECT id, name, slug FROM "Category" WHERE id = ${category.id} LIMIT 1
         `;
-        
+
         if (idResult && idResult.length > 0) {
           verifyCategory = idResult[0];
           break;
@@ -319,7 +328,7 @@ export async function createTestCategory(name: string, slug?: string) {
         // Continue to next attempt
       }
     }
-    
+
     // Even if verification fails, trust the upsert result and return the category
     // The upsert operation is atomic and returns the created/updated record
     // If verification fails, it's likely a connection pool visibility issue, not a real problem
@@ -327,10 +336,12 @@ export async function createTestCategory(name: string, slug?: string) {
     if (!verifyCategory) {
       await new Promise((resolve) => setTimeout(resolve, 300));
       if (process.env.NODE_ENV === 'development') {
-        console.warn(`Category ${name} verification failed, but returning category from upsert (ID: ${category.id})`);
+        console.warn(
+          `Category ${name} verification failed, but returning category from upsert (ID: ${category.id})`,
+        );
       }
     }
-    
+
     return category;
   } catch (error) {
     console.error(`Error creating test category ${name} (slug: ${categorySlug}):`, error);
@@ -357,10 +368,10 @@ export async function createTestProduct(
   const categoryVerificationTimeoutMs = VERIFICATION_TIMEOUT_MS * 2; // Double timeout for category verification
   let category = null;
   const maxRetries = CATEGORY_VERIFICATION_MAX_RETRIES * 2; // Double retries for category verification
-  
+
   // Initial delay to give category time to be visible
   await new Promise((resolve) => setTimeout(resolve, 200));
-  
+
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     // Check timeout
     if (Date.now() - verificationStartTime > categoryVerificationTimeoutMs) {
@@ -368,22 +379,22 @@ export async function createTestProduct(
       // This handles cases where verification fails due to connection pool issues but category actually exists
       break;
     }
-    
+
     if (attempt > 0) {
       await new Promise((resolve) => setTimeout(resolve, 150 * attempt)); // Exponential backoff
     }
-    
+
     // Try multiple query strategies to find the category
     // Query by ID first (if categoryId is provided), then try other methods
     try {
       // Force connection refresh
       await prisma.$executeRaw`SELECT 1`;
-      
+
       // Query by ID
       const idResult = await prisma.$queryRaw<Array<{ id: string; name: string; slug: string }>>`
         SELECT id, name, slug FROM "Category" WHERE id = ${categoryId} LIMIT 1
       `;
-      
+
       if (idResult && idResult.length > 0) {
         category = idResult[0];
         break;
@@ -392,7 +403,7 @@ export async function createTestProduct(
       // Continue to next retry
     }
   }
-  
+
   // If category not found after retries, add extra delay and try one more time
   // This handles edge cases where category exists but isn't visible yet
   if (!category) {
@@ -408,7 +419,7 @@ export async function createTestProduct(
       // Will throw error below if still not found
     }
   }
-  
+
   // Only throw error if category still not found after all retries and delays
   // This ensures we've given maximum time for visibility
   if (!category) {
@@ -448,7 +459,7 @@ async function waitForCleanup(): Promise<void> {
   // Add timeout to prevent infinite waits (max 30 seconds)
   const timeout = 30000;
   const startTime = Date.now();
-  
+
   return new Promise<void>((resolve, reject) => {
     const checkTimeout = () => {
       if (Date.now() - startTime > timeout) {
@@ -462,7 +473,7 @@ async function waitForCleanup(): Promise<void> {
       // Check again after a short delay
       setTimeout(checkTimeout, 100);
     };
-    
+
     cleanupQueue.push(() => {
       if (Date.now() - startTime <= timeout) {
         resolve();
@@ -470,7 +481,7 @@ async function waitForCleanup(): Promise<void> {
         reject(new Error(`waitForCleanup timed out after ${timeout}ms`));
       }
     });
-    
+
     // Also check periodically in case queue notification fails
     checkTimeout();
   });
@@ -483,10 +494,7 @@ async function waitForCleanup(): Promise<void> {
  * @param tableName - Name of the table being deleted (for logging)
  * @param deleteFn - Function that performs the delete operation
  */
-async function safeDelete(
-  tableName: string,
-  deleteFn: () => Promise<unknown>,
-): Promise<void> {
+async function safeDelete(tableName: string, deleteFn: () => Promise<unknown>): Promise<void> {
   try {
     await deleteFn();
   } catch (error: unknown) {
@@ -528,9 +536,7 @@ async function safeDelete(
         ? error.code
         : 'UNKNOWN';
 
-    console.warn(
-      `⚠️  Failed to delete from table "${tableName}": [${errorCode}] ${errorMessage}`,
-    );
+    console.warn(`⚠️  Failed to delete from table "${tableName}": [${errorCode}] ${errorMessage}`);
 
     // Optionally rethrow if you want to fail fast on unexpected errors
     // For now, we log and continue to allow cleanup to proceed with other tables
@@ -543,7 +549,7 @@ export async function cleanupDatabase() {
   // Add overall timeout for cleanup (max 45 seconds)
   const cleanupTimeout = 45000;
   const cleanupStartTime = Date.now();
-  
+
   // Wait for any ongoing cleanup to complete (prevents deadlocks from concurrent TRUNCATE)
   // Wrap in try/catch to handle timeout errors
   try {
@@ -554,14 +560,16 @@ export async function cleanupDatabase() {
     console.warn('waitForCleanup timed out, proceeding with cleanup anyway:', error);
     cleanupInProgress = false; // Reset flag in case it was stuck
   }
-  
+
   // Check if we've already exceeded timeout
   if (Date.now() - cleanupStartTime > cleanupTimeout) {
-    throw new Error(`cleanupDatabase timeout: already exceeded ${cleanupTimeout}ms before starting`);
+    throw new Error(
+      `cleanupDatabase timeout: already exceeded ${cleanupTimeout}ms before starting`,
+    );
   }
-  
+
   cleanupInProgress = true;
-  
+
   try {
     // Use TRUNCATE with CASCADE for robust, fast cleanup
     // This approach:
@@ -569,23 +577,25 @@ export async function cleanupDatabase() {
     // 2. Resets auto-increment sequences with RESTART IDENTITY
     // 3. Is atomic and much faster than individual deleteMany() calls
     // 4. Prevents orphaned records and FK violations
-    
+
     // Retry logic for deadlock handling (PostgreSQL deadlock code: 40P01)
     // Reduced retries and faster fallback to prevent timeouts
     const maxRetries = 3; // Reduced from 5 to fail faster
     let lastError: unknown = null;
-    
+
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       // Check timeout before each attempt
       if (Date.now() - cleanupStartTime > cleanupTimeout) {
-        throw new Error(`cleanupDatabase timeout: exceeded ${cleanupTimeout}ms during TRUNCATE retries`);
+        throw new Error(
+          `cleanupDatabase timeout: exceeded ${cleanupTimeout}ms during TRUNCATE retries`,
+        );
       }
-      
+
       if (attempt > 0) {
         // Shorter exponential backoff: 25ms, 50ms, 100ms
         await new Promise((resolve) => setTimeout(resolve, 25 * Math.pow(2, attempt - 1)));
       }
-      
+
       try {
         // Get all tables in the public schema (Postgres)
         // Exclude Prisma migration tables (_prisma_migrations)
@@ -603,18 +613,16 @@ export async function cleanupDatabase() {
         // RESTART IDENTITY resets auto-increment sequences
         const tableNames = tables.map((t) => `"${t.tablename}"`).join(', ');
 
-        await prisma.$executeRawUnsafe(
-          `TRUNCATE TABLE ${tableNames} RESTART IDENTITY CASCADE;`,
-        );
-        
+        await prisma.$executeRawUnsafe(`TRUNCATE TABLE ${tableNames} RESTART IDENTITY CASCADE;`);
+
         // Shorter delay - TRUNCATE is atomic and should be immediately visible
         await new Promise((resolve) => setTimeout(resolve, 50));
-        
+
         // Success - break out of retry loop
         return;
       } catch (error: unknown) {
         lastError = error;
-        
+
         // Check if it's a deadlock error (PostgreSQL error code 40P01)
         if (
           typeof error === 'object' &&
@@ -631,7 +639,7 @@ export async function cleanupDatabase() {
         break;
       }
     }
-    
+
     // If TRUNCATE failed after retries, fall back to deleteMany
     throw lastError;
   } catch (error) {
@@ -649,11 +657,11 @@ export async function cleanupDatabase() {
       }
       throw new Error(`cleanupDatabase timeout: exceeded ${cleanupTimeout}ms`);
     }
-    
+
     // If TRUNCATE fails, fall back to individual deleteMany calls
     // This provides a safety net if TRUNCATE is not available or fails
     console.warn('TRUNCATE failed, falling back to deleteMany:', error);
-    
+
     // Fallback: delete in dependency order
     // Use safeDelete helper to only suppress expected "table does not exist" errors
     // All other errors (connection, permission, constraint violations) will be logged
@@ -665,9 +673,7 @@ export async function cleanupDatabase() {
       safeDelete('productVariant', () => prisma.productVariant.deleteMany()),
       safeDelete('cartItem', () => prisma.cartItem.deleteMany()),
       safeDelete('cart', () => prisma.cart.deleteMany()),
-      safeDelete('orderStatusHistory', () =>
-        prisma.orderStatusHistory.deleteMany(),
-      ),
+      safeDelete('orderStatusHistory', () => prisma.orderStatusHistory.deleteMany()),
       safeDelete('orderItem', () => prisma.orderItem.deleteMany()),
       safeDelete('order', () => prisma.order.deleteMany()),
       safeDelete('coupon', () => prisma.coupon.deleteMany()),
@@ -675,7 +681,7 @@ export async function cleanupDatabase() {
       safeDelete('category', () => prisma.category.deleteMany()),
       safeDelete('user', () => prisma.user.deleteMany()),
     ]);
-    
+
     // Shorter delay after fallback cleanup
     await new Promise((resolve) => setTimeout(resolve, 50));
   } finally {

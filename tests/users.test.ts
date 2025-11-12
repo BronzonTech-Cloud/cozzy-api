@@ -11,7 +11,7 @@ describe('Users', () => {
 
   beforeEach(async () => {
     await cleanupDatabase();
-    
+
     // Create users and get tokens using helper
     const adminResult = await createTestUserAndLogin(app, 'admin@example.com', 'ADMIN');
     adminToken = adminResult.token;

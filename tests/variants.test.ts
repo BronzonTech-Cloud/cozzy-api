@@ -19,7 +19,7 @@ describe('Product Variants', () => {
 
   beforeEach(async () => {
     await cleanupDatabase();
-    
+
     // Create users and get tokens using helper
     const adminResult = await createTestUserAndLogin(app, 'admin@example.com', 'ADMIN');
     adminToken = adminResult.token;
@@ -30,8 +30,14 @@ describe('Product Variants', () => {
     const category = await createTestCategory('Electronics');
     categoryId = category.id;
 
+    // Small delay to ensure category is fully visible before creating product
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
     const product = await createTestProduct(categoryId, { title: 'Test Product', stock: 10 });
     productId = product.id;
+
+    // Small delay to ensure product is fully visible before test operations
+    await new Promise((resolve) => setTimeout(resolve, 100));
   });
 
   describe('GET /api/v1/products/:id/variants', () => {

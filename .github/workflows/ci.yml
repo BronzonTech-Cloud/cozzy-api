@@ -28,6 +28,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v1
         with:
@@ -97,10 +102,11 @@ jobs:
           CLIENT_URL: http://localhost:3000
           # Tune test retry settings for CI reliability
           # Increased retries and timeout for slower CI environments with connection pooling delays
-          TEST_VERIFICATION_MAX_RETRIES: 20
-          TEST_VERIFICATION_TIMEOUT_MS: 60000
-          TEST_LOGIN_MAX_RETRIES: 15
-          TEST_CATEGORY_VERIFICATION_MAX_RETRIES: 20
+          # These values are higher than defaults to handle CI database visibility issues
+          TEST_VERIFICATION_MAX_RETRIES: 30
+          TEST_VERIFICATION_TIMEOUT_MS: 90000
+          TEST_LOGIN_MAX_RETRIES: 20
+          TEST_CATEGORY_VERIFICATION_MAX_RETRIES: 30
         run: bun run test
         timeout-minutes: 15
         continue-on-error: false

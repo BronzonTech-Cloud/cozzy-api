@@ -60,6 +60,18 @@ tmp/
 temp/
 *.tmp
 
+# Act (local CI testing)
+.act.secrets
+.act.secrets.backup
+.act.secrets.example
+.actrc
+bin/act
+.github/workflows/ci.act.yml
+scripts/act-run.sh
+scripts/setup-act-db.sh
+ACT_USAGE.md
+# Note: bin/act is a binary that can be reinstalled with: curl -s https://raw.githubusercontent.com/nektos/act/master/install.sh | bash
+
 # Lock files (optional - uncomment if you want to ignore lock files)
 # package-lock.json
 # yarn.lock

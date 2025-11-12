@@ -15,7 +15,7 @@ describe('Categories', () => {
 
   beforeEach(async () => {
     await cleanupDatabase();
-    
+
     // Create admin user and get token using helper
     const adminResult = await createTestUserAndLogin(app, 'admin@example.com', 'ADMIN');
     adminToken = adminResult.token;
@@ -25,7 +25,7 @@ describe('Categories', () => {
     it('should list all categories', async () => {
       const cat1 = await createTestCategory('Electronics');
       const cat2 = await createTestCategory('Clothing');
-      
+
       // Wait for categories to be visible
       await new Promise((resolve) => setTimeout(resolve, 300));
 
@@ -36,7 +36,10 @@ describe('Categories', () => {
       // Categories might not be visible immediately, so check if at least one exists
       // The test should pass if categories are created, even if not immediately visible
       if (res.body.categories.length === 0) {
-        console.warn('Categories not visible yet, but were created:', { cat1: cat1.id, cat2: cat2.id });
+        console.warn('Categories not visible yet, but were created:', {
+          cat1: cat1.id,
+          cat2: cat2.id,
+        });
       }
       expect(res.body.categories.length).toBeGreaterThanOrEqual(2);
     });

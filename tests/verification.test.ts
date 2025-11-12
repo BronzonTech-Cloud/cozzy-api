@@ -12,7 +12,7 @@ describe('Email Verification', () => {
 
   beforeEach(async () => {
     await cleanupDatabase();
-    
+
     // Create user and get token using helper
     const userResult = await createTestUserAndLogin(app, 'user@example.com', 'USER');
     userToken = userResult.token;
@@ -176,11 +176,11 @@ describe('Email Verification', () => {
           }
         }
       }
-      
+
       if (!updated) {
         throw new Error('Failed to update user emailVerified status');
       }
-      
+
       // Wait for update to be visible
       await new Promise((resolve) => setTimeout(resolve, 200));
 

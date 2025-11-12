@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { DiscountType } from '@prisma/client';
 
 import { prisma } from '../../config/prisma';
+import { handlePrismaError } from '../../utils/prisma-errors';
 
 export async function listCoupons(req: Request, res: Response) {
   const coupons = await prisma.coupon.findMany({
@@ -266,6 +267,10 @@ export async function updateCoupon(req: Request, res: Response) {
 
     return res.json({ coupon: updatedCoupon });
   } catch (error) {
+    // Handle Prisma errors (e.g., unique constraint violations)
+    if (handlePrismaError(error, res)) {
+      return;
+    }
     console.error(
       'Error in updateCoupon:',
       error instanceof Error ? error.message : 'Unknown error',
@@ -275,16 +280,29 @@ export async function updateCoupon(req: Request, res: Response) {
 }
 
 export async function deleteCoupon(req: Request, res: Response) {
-  const { id } = req.params as { id: string };
+  try {
+    const { id } = req.params as { id: string };
 
-  const coupon = await prisma.coupon.findUnique({ where: { id } });
-  if (!coupon) {
-    return res.status(404).json({ message: 'Coupon not found' });
+    // Check if coupon exists before deleting
+    const coupon = await prisma.coupon.findUnique({ where: { id } });
+    if (!coupon) {
+      return res.status(404).json({ message: 'Coupon not found' });
+    }
+
+    await prisma.coupon.delete({ where: { id } });
+
+    return res.json({ message: 'Coupon deleted successfully' });
+  } catch (error) {
+    // Handle Prisma errors
+    if (handlePrismaError(error, res)) {
+      return;
+    }
+    console.error(
+      'Error in deleteCoupon:',
+      error instanceof Error ? error.message : 'Unknown error',
+    );
+    return res.status(500).json({ message: 'An error occurred. Please try again later.' });
   }
-
-  await prisma.coupon.delete({ where: { id } });
-
-  return res.json({ message: 'Coupon deleted successfully' });
 }
 
 export async function validateCoupon(req: Request, res: Response) {
