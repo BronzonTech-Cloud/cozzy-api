@@ -356,7 +356,7 @@ export async function validateCoupon(req: Request, res: Response) {
     }
 
     // Check minimum purchase
-    if (coupon.minPurchase && totalCents < coupon.minPurchase) {
+    if (coupon.minPurchase != null && totalCents < coupon.minPurchase) {
       return res.status(400).json({
         message: `Minimum purchase of ${coupon.minPurchase / 100} required`,
       });
