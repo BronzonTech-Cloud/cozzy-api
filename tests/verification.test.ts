@@ -2,7 +2,7 @@ import request from 'supertest';
 
 import { createApp } from '../src/app';
 import { prisma } from '../src/config/prisma';
-import { createTestUser, createTestUserAndLogin, cleanupDatabase } from './helpers';
+import { createTestUserAndLogin, cleanupDatabase } from './helpers';
 
 const app = createApp();
 
@@ -92,17 +92,58 @@ describe('Email Verification', () => {
     });
 
     it('should return 400 for expired token', async () => {
+      // Ensure user is visible before updating
+      let user = null;
+      for (let attempt = 0; attempt < 8; attempt++) {
+        if (attempt > 0) {
+          await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
+        }
+        try {
+          await prisma.$executeRaw`SELECT 1`;
+          user = await prisma.user.findUnique({ where: { id: userId } });
+          if (user) break;
+        } catch {
+          // Continue to next attempt
+        }
+      }
+
+      if (!user) {
+        throw new Error(`User with ID ${userId} not found. Cannot update verification token.`);
+      }
+
       // Create expired token
       const expiredDate = new Date();
       expiredDate.setHours(expiredDate.getHours() - 25); // 25 hours ago
 
-      await prisma.user.update({
-        where: { id: userId },
-        data: {
-          verificationToken: 'expired-token',
-          verificationTokenExpires: expiredDate,
-        },
-      });
+      // Update with retry logic
+      let updated = false;
+      for (let attempt = 0; attempt < 8; attempt++) {
+        if (attempt > 0) {
+          await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
+        }
+        try {
+          await prisma.$executeRaw`SELECT 1`;
+          await prisma.user.update({
+            where: { id: userId },
+            data: {
+              verificationToken: 'expired-token',
+              verificationTokenExpires: expiredDate,
+            },
+          });
+          updated = true;
+          break;
+        } catch (error) {
+          if (attempt < 7) {
+            // Continue to next attempt
+          } else {
+            throw error;
+          }
+        }
+      }
+
+      if (!updated) {
+        throw new Error('Failed to update user verification token after retries');
+      }
 
       const res = await request(app).get('/api/v1/auth/verify-email/expired-token');
 

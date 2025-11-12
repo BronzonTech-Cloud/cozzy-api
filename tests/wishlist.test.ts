@@ -2,13 +2,11 @@ import request from 'supertest';
 
 import { createApp } from '../src/app';
 import {
-  createTestUser,
   createTestUserAndLogin,
   createTestCategory,
   createTestProduct,
   cleanupDatabase,
 } from './helpers';
-import { prisma } from '../src/config/prisma';
 
 const app = createApp();
 

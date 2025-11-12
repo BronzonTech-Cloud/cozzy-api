@@ -3,7 +3,6 @@ import request from 'supertest';
 import { createApp } from '../src/app';
 import { prisma } from '../src/config/prisma';
 import {
-  createTestUser,
   createTestUserAndLogin,
   createTestCategory,
   createTestProduct,

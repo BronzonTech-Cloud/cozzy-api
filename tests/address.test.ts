@@ -1,7 +1,7 @@
 import request from 'supertest';
 
 import { createApp } from '../src/app';
-import { createTestUser, createTestUserAndLogin, cleanupDatabase } from './helpers';
+import { createTestUserAndLogin, cleanupDatabase } from './helpers';
 
 const app = createApp();
 

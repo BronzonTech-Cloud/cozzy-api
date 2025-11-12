@@ -29,7 +29,7 @@ try {
     },
   });
   console.log('✅ Test database prepared successfully');
-} catch (error) {
+} catch {
   console.error('❌ Failed to prepare test database');
   console.error('💡 If you see migration errors, try resetting the database:');
   console.error('   bunx prisma migrate reset --force --skip-seed');

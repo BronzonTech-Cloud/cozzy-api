@@ -3,7 +3,6 @@ import { vi } from 'vitest';
 
 import { createApp } from '../src/app';
 import {
-  createTestUser,
   createTestUserAndLogin,
   createTestCategory,
   createTestProduct,

@@ -123,7 +123,7 @@ export async function createCoupon(req: Request, res: Response) {
       if (validUntil <= validFrom) {
         return res.status(400).json({ message: 'validUntil must be after validFrom' });
       }
-    } catch (error) {
+    } catch {
       return res.status(400).json({ message: 'Invalid date format for validFrom or validUntil' });
     }
 
@@ -255,7 +255,7 @@ export async function updateCoupon(req: Request, res: Response) {
         if (validUntil <= validFrom) {
           return res.status(400).json({ message: 'validUntil must be after validFrom' });
         }
-      } catch (error) {
+      } catch {
         return res.status(400).json({ message: 'Invalid date format for validFrom or validUntil' });
       }
     }
@@ -366,7 +366,8 @@ export async function validateCoupon(req: Request, res: Response) {
     let discountCents = 0;
     if (coupon.discountType === 'PERCENTAGE') {
       discountCents = Math.floor((totalCents * coupon.discountValue) / 100);
-      if (coupon.maxDiscount) {
+      // Explicitly check for null/undefined to enforce maxDiscount = 0
+      if (coupon.maxDiscount != null) {
         discountCents = Math.min(discountCents, coupon.maxDiscount);
       }
     } else {

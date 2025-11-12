@@ -25,7 +25,7 @@ try {
     },
   });
   console.log('✅ Test database seeded successfully');
-} catch (error) {
+} catch {
   console.error('❌ Failed to seed test database');
   process.exit(1);
 }

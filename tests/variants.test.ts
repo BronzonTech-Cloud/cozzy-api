@@ -2,7 +2,6 @@ import request from 'supertest';
 
 import { createApp } from '../src/app';
 import {
-  createTestUser,
   createTestUserAndLogin,
   createTestCategory,
   createTestProduct,

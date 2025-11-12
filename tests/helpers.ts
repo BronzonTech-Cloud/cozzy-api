@@ -5,7 +5,6 @@ import request from 'supertest';
 import { prisma } from '../src/config/prisma';
 
 // Configurable retry settings via environment variables (useful for CI tuning)
-const VERIFICATION_MAX_RETRIES = parseInt(process.env.TEST_VERIFICATION_MAX_RETRIES || '15', 10);
 const VERIFICATION_TIMEOUT_MS = parseInt(process.env.TEST_VERIFICATION_TIMEOUT_MS || '30000', 10); // 30 seconds default
 const LOGIN_MAX_RETRIES = parseInt(process.env.TEST_LOGIN_MAX_RETRIES || '10', 10);
 const CATEGORY_VERIFICATION_MAX_RETRIES = parseInt(
@@ -30,13 +29,17 @@ export async function createTestUserAndLogin(
     throw new Error(`Failed to create test user: ${email}`);
   }
 
-  // CRITICAL: Wait for user to be visible in database before attempting login
-  // The login endpoint queries by email, so we must ensure the user is visible by email
-  // This prevents "User exists: false" errors in CI where connection pool visibility can be delayed
+  // CRITICAL: Wait for user to be visible in database WITH PASSWORD HASH before attempting login
+  // The login endpoint queries by email and requires password hash, so we must ensure both are visible
+  // This prevents "User exists: false" and "Invalid credentials" errors in CI
   const visibilityStartTime = Date.now();
-  const visibilityTimeoutMs = 10000; // 10 seconds max wait
+  const visibilityTimeoutMs = 15000; // 15 seconds max wait (increased for CI)
   let userVisibleByEmail = false;
-  const maxVisibilityAttempts = 20; // Increased attempts for CI reliability
+  let userHasPasswordHash = false;
+  const maxVisibilityAttempts = 30; // Increased attempts for CI reliability
+
+  // Get password hash from user object (should be set by createTestUser)
+  const expectedPasswordHash = user.passwordHash;
 
   for (let attempt = 0; attempt < maxVisibilityAttempts; attempt++) {
     // Check timeout
@@ -49,45 +52,103 @@ export async function createTestUserAndLogin(
       await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
     }
 
+    // Force connection refresh before each check
+    await prisma.$executeRaw`SELECT 1`;
+
     try {
-      // Query by email (same as login endpoint) to ensure user is visible
-      const emailCheck = await prisma.$queryRaw<Array<{ id: string; email: string }>>`
-        SELECT id, email FROM "User" WHERE email = ${email} LIMIT 1
+      // Query by email (same as login endpoint) and check password hash
+      const emailCheck = await prisma.$queryRaw<
+        Array<{ id: string; email: string; passwordHash: string | null }>
+      >`
+        SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
       `;
 
       if (emailCheck && emailCheck.length > 0 && emailCheck[0].id === user.id) {
         userVisibleByEmail = true;
-        break;
+        // CRITICAL: Also check password hash is present
+        if (emailCheck[0].passwordHash) {
+          userHasPasswordHash = true;
+          break;
+        } else {
+          // Password hash missing - try to update it
+          try {
+            await prisma.$executeRaw`
+              UPDATE "User" SET "passwordHash" = ${expectedPasswordHash || (await bcrypt.hash('password123', 10))} WHERE id = ${user.id}
+            `;
+            // Re-check after update
+            const recheck = await prisma.$queryRaw<
+              Array<{ id: string; email: string; passwordHash: string | null }>
+            >`
+              SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
+            `;
+            if (recheck && recheck.length > 0 && recheck[0].passwordHash) {
+              userHasPasswordHash = true;
+              break;
+            }
+          } catch {
+            // Continue to next attempt
+          }
+        }
       }
     } catch {
       // Continue to next attempt
     }
   }
 
-  // If user still not visible by email, add extra delay and try one more time
-  // This is critical because login will fail if user isn't visible
-  if (!userVisibleByEmail) {
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+  // If user still not visible or password hash missing, add extra delay and try one more time
+  // CRITICAL: Throw error if still not visible before attempting login to avoid wasted retries
+  if (!userVisibleByEmail || !userHasPasswordHash) {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
 
-    // Final check
+    // Force connection refresh
+    await prisma.$executeRaw`SELECT 1`;
+
+    // Final check and update if needed
+    let finalCheckPassed = false;
     try {
-      const finalEmailCheck = await prisma.$queryRaw<Array<{ id: string; email: string }>>`
-        SELECT id, email FROM "User" WHERE email = ${email} LIMIT 1
+      const finalEmailCheck = await prisma.$queryRaw<
+        Array<{ id: string; email: string; passwordHash: string | null }>
+      >`
+        SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
       `;
 
       if (finalEmailCheck && finalEmailCheck.length > 0 && finalEmailCheck[0].id === user.id) {
         userVisibleByEmail = true;
+        if (finalEmailCheck[0].passwordHash) {
+          userHasPasswordHash = true;
+          finalCheckPassed = true;
+        } else {
+          // Update password hash one more time
+          await prisma.$executeRaw`
+            UPDATE "User" SET "passwordHash" = ${expectedPasswordHash || (await bcrypt.hash('password123', 10))} WHERE id = ${user.id}
+          `;
+          // Small delay after update
+          await new Promise((resolve) => setTimeout(resolve, 300));
+          // Re-check after update
+          const recheck = await prisma.$queryRaw<
+            Array<{ id: string; email: string; passwordHash: string | null }>
+          >`
+            SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
+          `;
+          if (recheck && recheck.length > 0 && recheck[0].passwordHash) {
+            userHasPasswordHash = true;
+            finalCheckPassed = true;
+          }
+        }
       }
     } catch {
-      // Continue - will fail during login attempt
+      // Will throw error below
     }
-  }
 
-  // If user is still not visible, log warning but proceed (will fail during login with clear error)
-  if (!userVisibleByEmail && process.env.NODE_ENV === 'development') {
-    console.warn(
-      `User ${email} (ID: ${user.id}) not visible by email after ${maxVisibilityAttempts} attempts. Proceeding with login attempt...`,
-    );
+    // CRITICAL: Throw error if user is not visible before login attempts
+    // This prevents wasting time on login retries that will fail
+    if (!finalCheckPassed) {
+      throw new Error(
+        `createTestUserAndLogin failed: User ${email} (ID: ${user.id}) is not visible or missing password hash before login. ` +
+          `Visible by email: ${userVisibleByEmail}, Has password hash: ${userHasPasswordHash}. ` +
+          `This indicates a database visibility issue that must be fixed in the helper.`,
+      );
+    }
   }
 
   // Retry login with exponential backoff (handles timing issues in CI)
@@ -136,6 +197,7 @@ export async function createTestUserAndLogin(
       userEmail: email,
       userHasPassword: !!debugUser?.passwordHash,
       userVisibleByEmail: userVisibleByEmail,
+      userHasPasswordHash: userHasPasswordHash,
     };
 
     throw new Error(
@@ -149,32 +211,93 @@ export async function createTestUserAndLogin(
 
   // Final verification: ensure user is visible in database before returning
   // This prevents 404 errors in controllers that do user lookups
-  // Add a small delay and verify one more time
-  await new Promise((resolve) => setTimeout(resolve, 200));
-
+  // CRITICAL: This function MUST guarantee visibility - throw error if not visible
+  const finalVerificationStartTime = Date.now();
+  const finalVerificationTimeoutMs = 10000; // 10 seconds for final verification
+  const finalVerificationMaxAttempts = 20; // More attempts for reliability
   let finalUserCheck = false;
-  for (let attempt = 0; attempt < 3; attempt++) {
+
+  for (let attempt = 0; attempt < finalVerificationMaxAttempts; attempt++) {
+    // Check timeout
+    if (Date.now() - finalVerificationStartTime > finalVerificationTimeoutMs) {
+      break;
+    }
+
     if (attempt > 0) {
+      // Exponential backoff: 100ms, 200ms, 300ms, etc.
       await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
     }
 
+    // Force connection refresh before each check
+    await prisma.$executeRaw`SELECT 1`;
+
     try {
-      const finalCheck = await prisma.$queryRaw<Array<{ id: string }>>`
-        SELECT id FROM "User" WHERE id = ${user.id} LIMIT 1
+      // Verify user is visible by ID (for controllers that lookup by ID)
+      const finalCheckById = await prisma.$queryRaw<
+        Array<{ id: string; passwordHash: string | null }>
+      >`
+        SELECT id, "passwordHash" FROM "User" WHERE id = ${user.id} LIMIT 1
       `;
 
-      if (finalCheck && finalCheck.length > 0) {
+      // Also verify by email (for controllers that lookup by email from token)
+      const finalCheckByEmail = await prisma.$queryRaw<
+        Array<{ id: string; email: string; passwordHash: string | null }>
+      >`
+        SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
+      `;
+
+      // User must be visible by both ID and email, with password hash
+      if (
+        finalCheckById &&
+        finalCheckById.length > 0 &&
+        finalCheckById[0].id === user.id &&
+        finalCheckById[0].passwordHash &&
+        finalCheckByEmail &&
+        finalCheckByEmail.length > 0 &&
+        finalCheckByEmail[0].id === user.id &&
+        finalCheckByEmail[0].passwordHash
+      ) {
         finalUserCheck = true;
         break;
       }
-    } catch {
-      // Continue
+    } catch (error) {
+      // Continue to next attempt
+      if (attempt === finalVerificationMaxAttempts - 1) {
+        // Last attempt failed - log for debugging
+        console.warn(`Final verification attempt ${attempt + 1} failed:`, error);
+      }
     }
   }
 
-  // If still not visible, add one more delay (user exists, just not visible yet)
+  // CRITICAL: Throw error if user is not visible - this function must guarantee visibility
   if (!finalUserCheck) {
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    // One final attempt with longer delay
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await prisma.$executeRaw`SELECT 1`;
+
+    const lastCheckById = await prisma.$queryRaw<
+      Array<{ id: string; passwordHash: string | null }>
+    >`
+      SELECT id, "passwordHash" FROM "User" WHERE id = ${user.id} LIMIT 1
+    `;
+
+    const lastCheckByEmail = await prisma.$queryRaw<
+      Array<{ id: string; email: string; passwordHash: string | null }>
+    >`
+      SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
+    `;
+
+    const visibleById = lastCheckById && lastCheckById.length > 0 && lastCheckById[0].passwordHash;
+    const visibleByEmail =
+      lastCheckByEmail && lastCheckByEmail.length > 0 && lastCheckByEmail[0].passwordHash;
+
+    if (!visibleById || !visibleByEmail) {
+      throw new Error(
+        `createTestUserAndLogin failed: User ${email} (ID: ${user.id}) is not fully visible after login. ` +
+          `Visible by ID: ${visibleById}, Visible by Email: ${visibleByEmail}. ` +
+          `This indicates a database visibility issue that must be fixed in the helper, not with defensive checks in tests.`,
+      );
+    }
   }
 
   return {
@@ -218,6 +341,7 @@ export async function createTestUser(email: string, role: 'USER' | 'ADMIN' = 'US
     }
 
     // CRITICAL: Verify password hash was set correctly
+    // If missing, update it explicitly and ensure it's stored in user object
     if (!user.passwordHash) {
       // If password hash is missing, update it explicitly
       const updatedUser = await prisma.user.update({
@@ -227,8 +351,13 @@ export async function createTestUser(email: string, role: 'USER' | 'ADMIN' = 'US
       if (!updatedUser.passwordHash) {
         throw new Error(`Password hash not set for user ${email} (ID: ${user.id})`);
       }
-      // Use updated user
-      Object.assign(user, updatedUser);
+      // Use updated user - ensure passwordHash is in the returned object
+      user.passwordHash = updatedUser.passwordHash;
+    }
+
+    // Ensure passwordHash is always set in the returned user object
+    if (!user.passwordHash) {
+      user.passwordHash = passwordHash;
     }
 
     // Force connection refresh by executing queries to cycle through connection pool
@@ -250,7 +379,7 @@ export async function createTestUser(email: string, role: 'USER' | 'ADMIN' = 'US
         // Exponential backoff with longer delays for CI
         await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
       }
-      
+
       // Force connection refresh before each verification attempt
       await prisma.$executeRaw`SELECT 1`;
 
@@ -311,7 +440,7 @@ export async function createTestUser(email: string, role: 'USER' | 'ADMIN' = 'US
       // Force connection refresh
       await prisma.$executeRaw`SELECT 1`;
       await new Promise((resolve) => setTimeout(resolve, 800));
-      
+
       // Final attempt: ensure password hash is set using raw SQL to force connection refresh
       try {
         // Use raw SQL to force a fresh connection and check user
@@ -336,7 +465,7 @@ export async function createTestUser(email: string, role: 'USER' | 'ADMIN' = 'US
             await prisma.$executeRaw`
               UPDATE "User" SET "passwordHash" = ${passwordHash} WHERE id = ${user.id}
             `;
-          } catch (updateError) {
+          } catch {
             // If update fails, user might not be visible yet - this is OK, upsert already set it
             if (process.env.NODE_ENV === 'development') {
               console.warn(
@@ -345,7 +474,7 @@ export async function createTestUser(email: string, role: 'USER' | 'ADMIN' = 'US
             }
           }
         }
-      } catch (error) {
+      } catch {
         // Verification failed, but upsert succeeded - trust the upsert result
         // The user exists, just not visible to this connection yet
         if (process.env.NODE_ENV === 'development') {
@@ -403,16 +532,26 @@ export async function createTestCategory(name: string, slug?: string) {
     // Increased delay for CI environments where connection pool visibility can be slower
     await new Promise((resolve) => setTimeout(resolve, 400));
 
-    // Lightweight verification: try to find the category by ID (most reliable)
-    // If this fails, we still return the category object from upsert (trust the operation)
-    // The verification is just a sanity check, not a hard requirement
+    // CRITICAL: Verify category is visible - this function must guarantee visibility
+    // This prevents FK violations when creating products that reference this category
+    const verificationStartTime = Date.now();
+    const verificationTimeoutMs = 10000; // 10 seconds for verification
+    const verificationMaxAttempts = 20; // More attempts for reliability
     let verifyCategory = null;
-    const quickVerificationAttempts = 5; // Increased for CI reliability
 
-    for (let attempt = 0; attempt < quickVerificationAttempts; attempt++) {
-      if (attempt > 0) {
-        await new Promise((resolve) => setTimeout(resolve, 150 * attempt));
+    for (let attempt = 0; attempt < verificationMaxAttempts; attempt++) {
+      // Check timeout
+      if (Date.now() - verificationStartTime > verificationTimeoutMs) {
+        break;
       }
+
+      if (attempt > 0) {
+        // Exponential backoff: 100ms, 200ms, 300ms, etc.
+        await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+      }
+
+      // Force connection refresh before each check
+      await prisma.$executeRaw`SELECT 1`;
 
       try {
         // Query by ID - most reliable since we have the exact ID from upsert
@@ -420,24 +559,32 @@ export async function createTestCategory(name: string, slug?: string) {
           SELECT id, name, slug FROM "Category" WHERE id = ${category.id} LIMIT 1
         `;
 
-        if (idResult && idResult.length > 0) {
+        if (idResult && idResult.length > 0 && idResult[0].id === category.id) {
           verifyCategory = idResult[0];
           break;
         }
-      } catch {
+      } catch (error) {
         // Continue to next attempt
+        if (attempt === verificationMaxAttempts - 1) {
+          console.warn(`Category verification attempt ${attempt + 1} failed:`, error);
+        }
       }
     }
 
-    // Even if verification fails, trust the upsert result and return the category
-    // The upsert operation is atomic and returns the created/updated record
-    // If verification fails, it's likely a connection pool visibility issue, not a real problem
-    // Add extra delay if verification failed to give more time for visibility
+    // CRITICAL: Throw error if category is not visible - this function must guarantee visibility
     if (!verifyCategory) {
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      if (process.env.NODE_ENV === 'development') {
-        console.warn(
-          `Category ${name} verification failed, but returning category from upsert (ID: ${category.id})`,
+      // One final attempt with longer delay
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await prisma.$executeRaw`SELECT 1`;
+
+      const lastCheck = await prisma.$queryRaw<Array<{ id: string; name: string; slug: string }>>`
+        SELECT id, name, slug FROM "Category" WHERE id = ${category.id} LIMIT 1
+      `;
+
+      if (!lastCheck || lastCheck.length === 0 || lastCheck[0].id !== category.id) {
+        throw new Error(
+          `createTestCategory failed: Category ${name} (ID: ${category.id}, slug: ${categorySlug}) is not visible after creation. ` +
+            `This indicates a database visibility issue that must be fixed in the helper.`,
         );
       }
     }
@@ -499,7 +646,7 @@ export async function createTestProduct(
         category = idResult[0];
         break;
       }
-    } catch (error) {
+    } catch {
       // Continue to next retry
     }
   }
@@ -533,7 +680,8 @@ export async function createTestProduct(
   const baseSlug = data?.slug || (data?.title || 'test-product').toLowerCase().replace(/\s+/g, '-');
   const uniqueSlug = `${baseSlug}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 
-  return prisma.product.create({
+  // Create the product
+  const product = await prisma.product.create({
     data: {
       title: data?.title || 'Test Product',
       slug: uniqueSlug,
@@ -546,6 +694,76 @@ export async function createTestProduct(
       categoryId,
     },
   });
+
+  // Verify product was created
+  if (!product || !product.id) {
+    throw new Error(`Failed to create product with slug ${uniqueSlug}`);
+  }
+
+  // Force connection refresh
+  await prisma.$executeRaw`SELECT 1`;
+
+  // Delay to ensure commit is visible
+  await new Promise((resolve) => setTimeout(resolve, 400));
+
+  // CRITICAL: Verify product is visible - this function must guarantee visibility
+  // This prevents FK violations when creating orders/reviews that reference this product
+  const productVerificationStartTime = Date.now();
+  const productVerificationTimeoutMs = 10000; // 10 seconds for verification
+  const productVerificationMaxAttempts = 20; // More attempts for reliability
+  let verifyProduct = null;
+
+  for (let attempt = 0; attempt < productVerificationMaxAttempts; attempt++) {
+    // Check timeout
+    if (Date.now() - productVerificationStartTime > productVerificationTimeoutMs) {
+      break;
+    }
+
+    if (attempt > 0) {
+      // Exponential backoff: 100ms, 200ms, 300ms, etc.
+      await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+    }
+
+    // Force connection refresh before each check
+    await prisma.$executeRaw`SELECT 1`;
+
+    try {
+      // Query by ID - most reliable since we have the exact ID from create
+      const idResult = await prisma.$queryRaw<Array<{ id: string; title: string; slug: string }>>`
+        SELECT id, title, slug FROM "Product" WHERE id = ${product.id} LIMIT 1
+      `;
+
+      if (idResult && idResult.length > 0 && idResult[0].id === product.id) {
+        verifyProduct = idResult[0];
+        break;
+      }
+    } catch (error) {
+      // Continue to next attempt
+      if (attempt === productVerificationMaxAttempts - 1) {
+        console.warn(`Product verification attempt ${attempt + 1} failed:`, error);
+      }
+    }
+  }
+
+  // CRITICAL: Throw error if product is not visible - this function must guarantee visibility
+  if (!verifyProduct) {
+    // One final attempt with longer delay
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await prisma.$executeRaw`SELECT 1`;
+
+    const lastCheck = await prisma.$queryRaw<Array<{ id: string; title: string; slug: string }>>`
+      SELECT id, title, slug FROM "Product" WHERE id = ${product.id} LIMIT 1
+    `;
+
+    if (!lastCheck || lastCheck.length === 0 || lastCheck[0].id !== product.id) {
+      throw new Error(
+        `createTestProduct failed: Product ${product.title} (ID: ${product.id}, slug: ${uniqueSlug}) is not visible after creation. ` +
+          `This indicates a database visibility issue that must be fixed in the helper.`,
+      );
+    }
+  }
+
+  return product;
 }
 
 // Simple mutex to prevent concurrent TRUNCATE operations (prevents deadlocks)
@@ -600,19 +818,29 @@ async function safeDelete(tableName: string, deleteFn: () => Promise<unknown>): 
   } catch (error: unknown) {
     // Extract message and code safely
     const message =
-      typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string'
+      typeof error === 'object' &&
+      error !== null &&
+      'message' in error &&
+      typeof error.message === 'string'
         ? error.message.toLowerCase()
         : '';
     const code =
-      typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      typeof error.code === 'string'
         ? error.code
         : '';
 
     // Only suppress actual "table/relation does not exist" errors
+    // Use regex to require "table"/"relation" and "does not exist" to appear together
+    // This prevents false positives like "update or delete on table 'X' violates foreign key constraint"
+    const tableMissingRegex =
+      /\b((table|relation)\b.*?\bdoes not exist|does not exist\b.*?\b(table|relation))\b/i;
     const isTableMissingError =
       code === 'P2021' || // Prisma: Table does not exist
       code === '42P01' || // PostgreSQL: relation does not exist
-      (message.includes('does not exist') && (message.includes('table') || message.includes('relation'))) ||
+      tableMissingRegex.test(message) ||
       message.includes('no such table'); // SQLite
 
     if (isTableMissingError) {
@@ -801,7 +1029,7 @@ export async function cleanupDatabase() {
     // Force connection refresh and add delay for CI
     await prisma.$executeRaw`SELECT 1`;
     await new Promise((resolve) => setTimeout(resolve, 400));
-    
+
     // Release mutex and notify waiting operations
     cleanupInProgress = false;
     // Process queue: notify next waiting operation

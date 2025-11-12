@@ -3,7 +3,6 @@ import request from 'supertest';
 import { createApp } from '../src/app';
 import { prisma } from '../src/config/prisma';
 import {
-  createTestUser,
   createTestUserAndLogin,
   createTestCategory,
   createTestProduct,
@@ -28,9 +27,6 @@ describe('Order Status Tracking', () => {
 
     const adminResult = await createTestUserAndLogin(app, 'admin@example.com', 'ADMIN');
     adminToken = adminResult.token;
-
-    // Small delay to ensure users are fully visible before creating related entities
-    await new Promise((resolve) => setTimeout(resolve, 200));
 
     const category = await createTestCategory('Electronics');
     categoryId = category.id;
@@ -155,12 +151,8 @@ describe('Order Status Tracking', () => {
     });
 
     it('should return 403 for other user orders', async () => {
-      // Use createTestUserAndLogin to ensure user is visible before login
       const otherUserResult = await createTestUserAndLogin(app, 'other@example.com', 'USER');
       const otherToken = otherUserResult.token;
-      
-      // Small delay to ensure user is fully visible
-      await new Promise((resolve) => setTimeout(resolve, 200));
 
       const res = await request(app)
         .get(`/api/v1/orders/${orderId}/tracking`)
@@ -225,12 +217,8 @@ describe('Order Status Tracking', () => {
     });
 
     it('should return 403 for other user orders', async () => {
-      // Use createTestUserAndLogin to ensure user is visible before login
       const otherUserResult = await createTestUserAndLogin(app, 'other@example.com', 'USER');
       const otherToken = otherUserResult.token;
-      
-      // Small delay to ensure user is fully visible
-      await new Promise((resolve) => setTimeout(resolve, 200));
 
       const res = await request(app)
         .post(`/api/v1/orders/${orderId}/cancel`)
