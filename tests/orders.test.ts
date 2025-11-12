@@ -93,10 +93,7 @@ describe('Orders', () => {
         });
 
       // If order creation failed, skip this test
-      if (createRes.status !== 201) {
-        console.warn('Order creation failed in test, skipping:', createRes.body);
-        return;
-      }
+      expect(createRes.status).toBe(201);
 
       const res = await request(app)
         .get('/api/v1/orders')
