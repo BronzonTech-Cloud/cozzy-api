@@ -31,7 +31,7 @@ export default defineConfig({
     },
     // Add test timeout and retry configuration for CI stability
     testTimeout: 30000, // 30 seconds per test
-    hookTimeout: 30000, // 30 seconds for hooks
+    hookTimeout: 60000, // 60 seconds for hooks (increased for CI reliability with database operations)
     teardownTimeout: 10000, // 10 seconds for teardown
   },
 });

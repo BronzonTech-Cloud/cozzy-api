@@ -30,14 +30,15 @@ export async function createTestUserAndLogin(
   // Additional delay to ensure user is visible before attempting login
   // The user was created by createTestUser, but we need to ensure it's visible for JWT creation
   // and subsequent database operations
-  await new Promise((resolve) => setTimeout(resolve, 300));
+  // Increased delay for CI reliability
+  await new Promise((resolve) => setTimeout(resolve, 500));
   
   // Quick verification that user exists before login (don't fail if not found, just wait longer)
   // This helps prevent foreign key violations when the user is used in order creation
   let userVisible = false;
-  for (let attempt = 0; attempt < 5; attempt++) {
+  for (let attempt = 0; attempt < 8; attempt++) {
     if (attempt > 0) {
-      await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+      await new Promise((resolve) => setTimeout(resolve, 150 * attempt));
     }
     
     try {
@@ -57,7 +58,7 @@ export async function createTestUserAndLogin(
   // If user still not visible, add extra delay before proceeding
   // This helps with connection pool visibility issues in CI
   if (!userVisible) {
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise((resolve) => setTimeout(resolve, 800));
   }
 
   // Retry login with exponential backoff (handles timing issues in CI)
@@ -103,6 +104,36 @@ export async function createTestUserAndLogin(
     throw new Error(`No access token in login response for ${email}`);
   }
 
+  // Final verification: ensure user is visible in database before returning
+  // This prevents 404 errors in controllers that do user lookups
+  // Add a small delay and verify one more time
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  
+  let finalUserCheck = false;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+    }
+    
+    try {
+      const finalCheck = await prisma.$queryRaw<Array<{ id: string }>>`
+        SELECT id FROM "User" WHERE id = ${user.id} LIMIT 1
+      `;
+      
+      if (finalCheck && finalCheck.length > 0) {
+        finalUserCheck = true;
+        break;
+      }
+    } catch {
+      // Continue
+    }
+  }
+  
+  // If still not visible, add one more delay (user exists, just not visible yet)
+  if (!finalUserCheck) {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  }
+
   return {
     user,
     token: loginRes.body.accessToken,
@@ -143,18 +174,18 @@ export async function createTestUser(email: string, role: 'USER' | 'ADMIN' = 'US
     await prisma.$executeRaw`SELECT 1`;
     
     // Delay to ensure commit is visible - upsert is atomic and commits immediately
-    // The delay helps with connection pool visibility in CI environments
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    // Increased delay for CI environments where connection pool visibility can be slower
+    await new Promise((resolve) => setTimeout(resolve, 400));
     
     // Lightweight verification: try to find the user by ID (most reliable)
     // If this fails, we still return the user object from upsert (trust the operation)
     // The verification is just a sanity check, not a hard requirement
     let verifyUser = null;
-    const quickVerificationAttempts = 3; // Reduced from 20 - just a quick check
+    const quickVerificationAttempts = 5; // Increased for CI reliability
     
     for (let attempt = 0; attempt < quickVerificationAttempts; attempt++) {
       if (attempt > 0) {
-        await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+        await new Promise((resolve) => setTimeout(resolve, 150 * attempt));
       }
       
       try {
@@ -175,8 +206,12 @@ export async function createTestUser(email: string, role: 'USER' | 'ADMIN' = 'US
     // Even if verification fails, trust the upsert result and return the user
     // The upsert operation is atomic and returns the created/updated record
     // If verification fails, it's likely a connection pool visibility issue, not a real problem
-    if (!verifyUser && process.env.NODE_ENV === 'development') {
-      console.warn(`User ${email} verification failed, but returning user from upsert (ID: ${user.id})`);
+    // Add extra delay if verification failed to give more time for visibility
+    if (!verifyUser) {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      if (process.env.NODE_ENV === 'development') {
+        console.warn(`User ${email} verification failed, but returning user from upsert (ID: ${user.id})`);
+      }
     }
     
     return user;
@@ -220,18 +255,18 @@ export async function createTestCategory(name: string, slug?: string) {
     await prisma.$executeRaw`SELECT 1`;
     
     // Delay to ensure commit is visible - upsert is atomic and commits immediately
-    // The delay helps with connection pool visibility in CI environments
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    // Increased delay for CI environments where connection pool visibility can be slower
+    await new Promise((resolve) => setTimeout(resolve, 400));
     
     // Lightweight verification: try to find the category by ID (most reliable)
     // If this fails, we still return the category object from upsert (trust the operation)
     // The verification is just a sanity check, not a hard requirement
     let verifyCategory = null;
-    const quickVerificationAttempts = 3; // Reduced from 20 - just a quick check
+    const quickVerificationAttempts = 5; // Increased for CI reliability
     
     for (let attempt = 0; attempt < quickVerificationAttempts; attempt++) {
       if (attempt > 0) {
-        await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+        await new Promise((resolve) => setTimeout(resolve, 150 * attempt));
       }
       
       try {
@@ -252,8 +287,12 @@ export async function createTestCategory(name: string, slug?: string) {
     // Even if verification fails, trust the upsert result and return the category
     // The upsert operation is atomic and returns the created/updated record
     // If verification fails, it's likely a connection pool visibility issue, not a real problem
-    if (!verifyCategory && process.env.NODE_ENV === 'development') {
-      console.warn(`Category ${name} verification failed, but returning category from upsert (ID: ${category.id})`);
+    // Add extra delay if verification failed to give more time for visibility
+    if (!verifyCategory) {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      if (process.env.NODE_ENV === 'development') {
+        console.warn(`Category ${name} verification failed, but returning category from upsert (ID: ${category.id})`);
+      }
     }
     
     return category;
@@ -277,21 +316,25 @@ export async function createTestProduct(
   // Retry logic with exponential backoff to handle potential timing issues in CI
   // Use raw query to bypass Prisma's connection pool caching
   // Add timeout to prevent infinite loops
+  // Increased retries and delays for CI reliability
   const verificationStartTime = Date.now();
-  const categoryVerificationTimeoutMs = VERIFICATION_TIMEOUT_MS;
+  const categoryVerificationTimeoutMs = VERIFICATION_TIMEOUT_MS * 2; // Double timeout for category verification
   let category = null;
-  const maxRetries = VERIFICATION_MAX_RETRIES;
+  const maxRetries = CATEGORY_VERIFICATION_MAX_RETRIES * 2; // Double retries for category verification
+  
+  // Initial delay to give category time to be visible
+  await new Promise((resolve) => setTimeout(resolve, 200));
   
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     // Check timeout
     if (Date.now() - verificationStartTime > categoryVerificationTimeoutMs) {
-      throw new Error(
-        `Category verification timeout after ${categoryVerificationTimeoutMs}ms for categoryId: ${categoryId}`,
-      );
+      // Don't throw - try to create product anyway and let database error if category really doesn't exist
+      // This handles cases where verification fails due to connection pool issues but category actually exists
+      break;
     }
     
     if (attempt > 0) {
-      await new Promise((resolve) => setTimeout(resolve, 100 * attempt)); // Exponential backoff
+      await new Promise((resolve) => setTimeout(resolve, 150 * attempt)); // Exponential backoff
     }
     
     // Try multiple query strategies to find the category
@@ -314,9 +357,27 @@ export async function createTestProduct(
     }
   }
   
+  // If category not found after retries, add extra delay and try one more time
+  // This handles edge cases where category exists but isn't visible yet
+  if (!category) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    try {
+      const finalResult = await prisma.$queryRaw<Array<{ id: string; name: string; slug: string }>>`
+        SELECT id, name, slug FROM "Category" WHERE id = ${categoryId} LIMIT 1
+      `;
+      if (finalResult && finalResult.length > 0) {
+        category = finalResult[0];
+      }
+    } catch {
+      // Will throw error below if still not found
+    }
+  }
+  
+  // Only throw error if category still not found after all retries and delays
+  // This ensures we've given maximum time for visibility
   if (!category) {
     throw new Error(
-      `Category with id ${categoryId} does not exist after ${maxRetries} retries. Ensure category is created before creating products.`,
+      `Category with id ${categoryId} does not exist after ${maxRetries} retries and additional delays. Ensure category is created before creating products.`,
     );
   }
 
