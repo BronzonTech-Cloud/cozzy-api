@@ -377,7 +377,20 @@ describe('Reviews', () => {
 
   describe('PATCH /api/v1/reviews/:reviewId', () => {
     beforeEach(async () => {
-      const user = await prisma.user.findUnique({ where: { email: 'user@example.com' } });
+      // Use the user from createTestUserAndLogin to ensure consistency
+      // Retry user lookup with exponential backoff to handle visibility issues
+      let user = null;
+      for (let attempt = 0; attempt < 10; attempt++) {
+        if (attempt > 0) {
+          await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+        }
+        
+        user = await prisma.user.findUnique({ where: { email: 'user@example.com' } });
+        if (user) {
+          break;
+        }
+      }
+      
       if (!user) {
         throw new Error('Test user not found. Ensure beforeEach creates the user.');
       }

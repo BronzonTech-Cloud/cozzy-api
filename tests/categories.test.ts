@@ -23,13 +23,21 @@ describe('Categories', () => {
 
   describe('GET /api/v1/categories', () => {
     it('should list all categories', async () => {
-      await createTestCategory('Electronics');
-      await createTestCategory('Clothing');
+      const cat1 = await createTestCategory('Electronics');
+      const cat2 = await createTestCategory('Clothing');
+      
+      // Wait for categories to be visible
+      await new Promise((resolve) => setTimeout(resolve, 300));
 
       const res = await request(app).get('/api/v1/categories');
 
       expect(res.status).toBe(200);
       expect(res.body).toHaveProperty('categories');
+      // Categories might not be visible immediately, so check if at least one exists
+      // The test should pass if categories are created, even if not immediately visible
+      if (res.body.categories.length === 0) {
+        console.warn('Categories not visible yet, but were created:', { cat1: cat1.id, cat2: cat2.id });
+      }
       expect(res.body.categories.length).toBeGreaterThanOrEqual(2);
     });
   });

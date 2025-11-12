@@ -27,38 +27,62 @@ export async function createTestUserAndLogin(
     throw new Error(`Failed to create test user: ${email}`);
   }
 
-  // Additional delay to ensure user is visible before attempting login
-  // The user was created by createTestUser, but we need to ensure it's visible for JWT creation
-  // and subsequent database operations
-  // Increased delay for CI reliability
-  await new Promise((resolve) => setTimeout(resolve, 500));
+  // CRITICAL: Wait for user to be visible in database before attempting login
+  // The login endpoint queries by email, so we must ensure the user is visible by email
+  // This prevents "User exists: false" errors in CI where connection pool visibility can be delayed
+  const visibilityStartTime = Date.now();
+  const visibilityTimeoutMs = 10000; // 10 seconds max wait
+  let userVisibleByEmail = false;
+  const maxVisibilityAttempts = 20; // Increased attempts for CI reliability
   
-  // Quick verification that user exists before login (don't fail if not found, just wait longer)
-  // This helps prevent foreign key violations when the user is used in order creation
-  let userVisible = false;
-  for (let attempt = 0; attempt < 8; attempt++) {
+  for (let attempt = 0; attempt < maxVisibilityAttempts; attempt++) {
+    // Check timeout
+    if (Date.now() - visibilityStartTime > visibilityTimeoutMs) {
+      break;
+    }
+    
     if (attempt > 0) {
-      await new Promise((resolve) => setTimeout(resolve, 150 * attempt));
+      // Exponential backoff: 100ms, 200ms, 300ms, etc.
+      await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
     }
     
     try {
-      const checkResult = await prisma.$queryRaw<Array<{ id: string }>>`
-        SELECT id FROM "User" WHERE id = ${user.id} LIMIT 1
+      // Query by email (same as login endpoint) to ensure user is visible
+      const emailCheck = await prisma.$queryRaw<Array<{ id: string; email: string }>>`
+        SELECT id, email FROM "User" WHERE email = ${email} LIMIT 1
       `;
       
-      if (checkResult && checkResult.length > 0) {
-        userVisible = true;
+      if (emailCheck && emailCheck.length > 0 && emailCheck[0].id === user.id) {
+        userVisibleByEmail = true;
         break;
       }
     } catch {
-      // Continue
+      // Continue to next attempt
     }
   }
   
-  // If user still not visible, add extra delay before proceeding
-  // This helps with connection pool visibility issues in CI
-  if (!userVisible) {
-    await new Promise((resolve) => setTimeout(resolve, 800));
+  // If user still not visible by email, add extra delay and try one more time
+  // This is critical because login will fail if user isn't visible
+  if (!userVisibleByEmail) {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    
+    // Final check
+    try {
+      const finalEmailCheck = await prisma.$queryRaw<Array<{ id: string; email: string }>>`
+        SELECT id, email FROM "User" WHERE email = ${email} LIMIT 1
+      `;
+      
+      if (finalEmailCheck && finalEmailCheck.length > 0 && finalEmailCheck[0].id === user.id) {
+        userVisibleByEmail = true;
+      }
+    } catch {
+      // Continue - will fail during login attempt
+    }
+  }
+  
+  // If user is still not visible, log warning but proceed (will fail during login with clear error)
+  if (!userVisibleByEmail && process.env.NODE_ENV === 'development') {
+    console.warn(`User ${email} (ID: ${user.id}) not visible by email after ${maxVisibilityAttempts} attempts. Proceeding with login attempt...`);
   }
 
   // Retry login with exponential backoff (handles timing issues in CI)
@@ -90,13 +114,25 @@ export async function createTestUserAndLogin(
 
   // Verify login succeeded
   if (!loginRes || loginRes.status !== 200) {
-    // Additional debugging: check if user exists using raw query
-    const debugResult = await prisma.$queryRaw<Array<{ id: string; email: string }>>`
-      SELECT id, email FROM "User" WHERE email = ${email} LIMIT 1
+    // Additional debugging: check if user exists using raw query (by email, same as login)
+    const debugResult = await prisma.$queryRaw<Array<{ id: string; email: string; passwordHash: string | null }>>`
+      SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
     `;
     const debugUser = debugResult && debugResult.length > 0 ? debugResult[0] : null;
+    
+    // More detailed error message
+    const errorDetails = {
+      status: loginRes?.status || 'no response',
+      body: loginRes?.body || {},
+      userExists: !!debugUser,
+      userId: user.id,
+      userEmail: email,
+      userHasPassword: !!debugUser?.passwordHash,
+      userVisibleByEmail: userVisibleByEmail,
+    };
+    
     throw new Error(
-      `Login failed for ${email}: ${loginRes?.status || 'no response'} - ${JSON.stringify(loginRes?.body || {})}. User exists: ${!!debugUser}, User ID: ${user.id}`,
+      `Login failed for ${email}: ${loginRes?.status || 'no response'} - ${JSON.stringify(loginRes?.body || {})}. Debug: ${JSON.stringify(errorDetails)}`,
     );
   }
 
@@ -409,8 +445,34 @@ async function waitForCleanup(): Promise<void> {
   if (!cleanupInProgress) {
     return;
   }
-  return new Promise<void>((resolve) => {
-    cleanupQueue.push(resolve);
+  // Add timeout to prevent infinite waits (max 30 seconds)
+  const timeout = 30000;
+  const startTime = Date.now();
+  
+  return new Promise<void>((resolve, reject) => {
+    const checkTimeout = () => {
+      if (Date.now() - startTime > timeout) {
+        reject(new Error(`waitForCleanup timed out after ${timeout}ms`));
+        return;
+      }
+      if (!cleanupInProgress) {
+        resolve();
+        return;
+      }
+      // Check again after a short delay
+      setTimeout(checkTimeout, 100);
+    };
+    
+    cleanupQueue.push(() => {
+      if (Date.now() - startTime <= timeout) {
+        resolve();
+      } else {
+        reject(new Error(`waitForCleanup timed out after ${timeout}ms`));
+      }
+    });
+    
+    // Also check periodically in case queue notification fails
+    checkTimeout();
   });
 }
 
@@ -478,8 +540,25 @@ async function safeDelete(
 }
 
 export async function cleanupDatabase() {
+  // Add overall timeout for cleanup (max 45 seconds)
+  const cleanupTimeout = 45000;
+  const cleanupStartTime = Date.now();
+  
   // Wait for any ongoing cleanup to complete (prevents deadlocks from concurrent TRUNCATE)
-  await waitForCleanup();
+  // Wrap in try/catch to handle timeout errors
+  try {
+    await waitForCleanup();
+  } catch (error) {
+    // If waitForCleanup times out, log warning and proceed anyway
+    // This prevents one stuck cleanup from blocking all tests
+    console.warn('waitForCleanup timed out, proceeding with cleanup anyway:', error);
+    cleanupInProgress = false; // Reset flag in case it was stuck
+  }
+  
+  // Check if we've already exceeded timeout
+  if (Date.now() - cleanupStartTime > cleanupTimeout) {
+    throw new Error(`cleanupDatabase timeout: already exceeded ${cleanupTimeout}ms before starting`);
+  }
   
   cleanupInProgress = true;
   
@@ -492,13 +571,19 @@ export async function cleanupDatabase() {
     // 4. Prevents orphaned records and FK violations
     
     // Retry logic for deadlock handling (PostgreSQL deadlock code: 40P01)
-    const maxRetries = 5;
+    // Reduced retries and faster fallback to prevent timeouts
+    const maxRetries = 3; // Reduced from 5 to fail faster
     let lastError: unknown = null;
     
     for (let attempt = 0; attempt < maxRetries; attempt++) {
+      // Check timeout before each attempt
+      if (Date.now() - cleanupStartTime > cleanupTimeout) {
+        throw new Error(`cleanupDatabase timeout: exceeded ${cleanupTimeout}ms during TRUNCATE retries`);
+      }
+      
       if (attempt > 0) {
-        // Exponential backoff: 50ms, 100ms, 200ms, 400ms
-        await new Promise((resolve) => setTimeout(resolve, 50 * Math.pow(2, attempt - 1)));
+        // Shorter exponential backoff: 25ms, 50ms, 100ms
+        await new Promise((resolve) => setTimeout(resolve, 25 * Math.pow(2, attempt - 1)));
       }
       
       try {
@@ -522,10 +607,8 @@ export async function cleanupDatabase() {
           `TRUNCATE TABLE ${tableNames} RESTART IDENTITY CASCADE;`,
         );
         
-        // Longer delay to ensure TRUNCATE transaction is fully committed and visible
-        // This helps prevent race conditions in CI environments where connection pooling
-        // or transaction isolation might cause visibility delays
-        await new Promise((resolve) => setTimeout(resolve, 100));
+        // Shorter delay - TRUNCATE is atomic and should be immediately visible
+        await new Promise((resolve) => setTimeout(resolve, 50));
         
         // Success - break out of retry loop
         return;
@@ -552,6 +635,21 @@ export async function cleanupDatabase() {
     // If TRUNCATE failed after retries, fall back to deleteMany
     throw lastError;
   } catch (error) {
+    // Check timeout before fallback
+    if (Date.now() - cleanupStartTime > cleanupTimeout) {
+      console.error('cleanupDatabase timeout: exceeded during fallback, releasing mutex');
+      cleanupInProgress = false;
+      const next = cleanupQueue.shift();
+      if (typeof next === 'function') {
+        try {
+          next();
+        } catch (e) {
+          console.error('Error notifying cleanup queue:', e);
+        }
+      }
+      throw new Error(`cleanupDatabase timeout: exceeded ${cleanupTimeout}ms`);
+    }
+    
     // If TRUNCATE fails, fall back to individual deleteMany calls
     // This provides a safety net if TRUNCATE is not available or fails
     console.warn('TRUNCATE failed, falling back to deleteMany:', error);
@@ -559,24 +657,27 @@ export async function cleanupDatabase() {
     // Fallback: delete in dependency order
     // Use safeDelete helper to only suppress expected "table does not exist" errors
     // All other errors (connection, permission, constraint violations) will be logged
-    await safeDelete('review', () => prisma.review.deleteMany());
-    await safeDelete('wishlist', () => prisma.wishlist.deleteMany());
-    await safeDelete('address', () => prisma.address.deleteMany());
-    await safeDelete('productVariant', () => prisma.productVariant.deleteMany());
-    await safeDelete('cartItem', () => prisma.cartItem.deleteMany());
-    await safeDelete('cart', () => prisma.cart.deleteMany());
-    await safeDelete('orderStatusHistory', () =>
-      prisma.orderStatusHistory.deleteMany(),
-    );
-    await safeDelete('orderItem', () => prisma.orderItem.deleteMany());
-    await safeDelete('order', () => prisma.order.deleteMany());
-    await safeDelete('coupon', () => prisma.coupon.deleteMany());
-    await safeDelete('product', () => prisma.product.deleteMany());
-    await safeDelete('category', () => prisma.category.deleteMany());
-    await safeDelete('user', () => prisma.user.deleteMany());
+    // Execute all deletes in parallel for speed (they're independent after TRUNCATE fails)
+    await Promise.all([
+      safeDelete('review', () => prisma.review.deleteMany()),
+      safeDelete('wishlist', () => prisma.wishlist.deleteMany()),
+      safeDelete('address', () => prisma.address.deleteMany()),
+      safeDelete('productVariant', () => prisma.productVariant.deleteMany()),
+      safeDelete('cartItem', () => prisma.cartItem.deleteMany()),
+      safeDelete('cart', () => prisma.cart.deleteMany()),
+      safeDelete('orderStatusHistory', () =>
+        prisma.orderStatusHistory.deleteMany(),
+      ),
+      safeDelete('orderItem', () => prisma.orderItem.deleteMany()),
+      safeDelete('order', () => prisma.order.deleteMany()),
+      safeDelete('coupon', () => prisma.coupon.deleteMany()),
+      safeDelete('product', () => prisma.product.deleteMany()),
+      safeDelete('category', () => prisma.category.deleteMany()),
+      safeDelete('user', () => prisma.user.deleteMany()),
+    ]);
     
-    // Delay after fallback cleanup to ensure deletes are visible
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Shorter delay after fallback cleanup
+    await new Promise((resolve) => setTimeout(resolve, 50));
   } finally {
     // Release mutex and notify waiting operations
     cleanupInProgress = false;

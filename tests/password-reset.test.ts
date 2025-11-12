@@ -93,9 +93,21 @@ describe('Password Reset', () => {
         email: userEmail,
       });
 
-      const user = await prisma.user.findUnique({ where: { id: userId } });
+      // Wait for token to be visible (handle potential visibility delays in CI)
+      let user = null;
+      for (let attempt = 0; attempt < 10; attempt++) {
+        if (attempt > 0) {
+          await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+        }
+        
+        user = await prisma.user.findUnique({ where: { id: userId } });
+        if (user?.resetPasswordToken) {
+          break;
+        }
+      }
+      
       if (!user?.resetPasswordToken) {
-        throw new Error('Reset token not found');
+        throw new Error('Reset token not found after retries');
       }
       resetToken = user.resetPasswordToken;
     });

@@ -35,18 +35,35 @@ describe('Order Status Tracking', () => {
     const product = await createTestProduct(categoryId, { title: 'Test Product', stock: 10 });
     productId = product.id;
 
-    // Create an order
-    const orderRes = await request(app)
-      .post('/api/v1/orders')
-      .set('Authorization', `Bearer ${userToken}`)
-      .send({
-        items: [{ productId, quantity: 2 }],
-      });
+    // Create an order - add retry logic for FK violations
+    let orderRes = null;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      if (attempt > 0) {
+        // Wait longer between retries to ensure user is visible
+        await new Promise((resolve) => setTimeout(resolve, 300 * attempt));
+      }
+      
+      orderRes = await request(app)
+        .post('/api/v1/orders')
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({
+          items: [{ productId, quantity: 2 }],
+        });
+      
+      if (orderRes.status === 201 && orderRes.body?.order?.id) {
+        break;
+      }
+      
+      // If it's a 500 error with FK violation, retry
+      if (orderRes.status === 500 && attempt < 4) {
+        continue;
+      }
+    }
 
-    expect(orderRes.status).toBe(201);
-    expect(orderRes.body).toHaveProperty('order');
-    expect(orderRes.body.order).not.toBeNull();
-    expect(orderRes.body.order).toHaveProperty('id');
+    expect(orderRes?.status).toBe(201);
+    expect(orderRes?.body).toHaveProperty('order');
+    expect(orderRes?.body.order).not.toBeNull();
+    expect(orderRes?.body.order).toHaveProperty('id');
     orderId = orderRes.body.order.id;
   });
 

@@ -158,11 +158,31 @@ describe('Email Verification', () => {
     });
 
     it('should return 400 if email is already verified', async () => {
-      // Verify email first
-      await prisma.user.update({
-        where: { id: userId },
-        data: { emailVerified: true },
-      });
+      // Verify email first - add retry logic for visibility
+      let updated = false;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        try {
+          await prisma.user.update({
+            where: { id: userId },
+            data: { emailVerified: true },
+          });
+          updated = true;
+          break;
+        } catch (error) {
+          if (attempt < 4) {
+            await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
+          } else {
+            throw error;
+          }
+        }
+      }
+      
+      if (!updated) {
+        throw new Error('Failed to update user emailVerified status');
+      }
+      
+      // Wait for update to be visible
+      await new Promise((resolve) => setTimeout(resolve, 200));
 
       const res = await request(app)
         .post('/api/v1/auth/resend-verification')
