@@ -56,75 +56,78 @@ export async function createTestUserAndLogin(
     await prisma.$executeRaw`SELECT 1`;
 
     try {
-      // Strategy 1: Try Prisma findUnique by email (same as login endpoint)
-      const prismaEmailCheck = await prisma.user.findUnique({
-        where: { email },
-      });
-      if (prismaEmailCheck && prismaEmailCheck.id === user.id) {
-        userVisibleByEmail = true;
-        if (prismaEmailCheck.passwordHash) {
-          userHasPasswordHash = true;
-          break;
-        } else {
-          // Password hash missing - try to update it
-          try {
-            const hashToUse = expectedPasswordHash || (await bcrypt.hash('password123', 10));
-            await prisma.user.update({
-              where: { id: user.id },
-              data: { passwordHash: hashToUse },
-            });
-            // Re-check after update
-            await new Promise((resolve) => setTimeout(resolve, 200));
-            const recheck = await prisma.user.findUnique({
-              where: { email },
-            });
-            if (recheck && recheck.passwordHash) {
+      // Use transaction with ReadCommitted isolation to ensure visibility
+      await prisma.$transaction(
+        async (tx) => {
+          // Strategy 1: Try Prisma findUnique by email (same as login endpoint)
+          const prismaEmailCheck = await tx.user.findUnique({
+            where: { email },
+          });
+          if (prismaEmailCheck && prismaEmailCheck.id === user.id) {
+            userVisibleByEmail = true;
+            if (prismaEmailCheck.passwordHash) {
               userHasPasswordHash = true;
-              break;
-            }
-          } catch {
-            // Continue to next attempt
-          }
-        }
-      }
-
-      // Strategy 2: Try raw SQL query by email (bypasses some caching)
-      if (!userVisibleByEmail || !userHasPasswordHash) {
-        const emailCheck = await prisma.$queryRaw<
-          Array<{ id: string; email: string; passwordHash: string | null }>
-        >`
-          SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
-        `;
-
-        if (emailCheck && emailCheck.length > 0 && emailCheck[0].id === user.id) {
-          userVisibleByEmail = true;
-          // CRITICAL: Also check password hash is present
-          if (emailCheck[0].passwordHash) {
-            userHasPasswordHash = true;
-            break;
-          } else {
-            // Password hash missing - try to update it
-            try {
+              return;
+            } else {
+              // Password hash missing - try to update it within transaction
               const hashToUse = expectedPasswordHash || (await bcrypt.hash('password123', 10));
-              await prisma.$executeRaw`
-                UPDATE "User" SET "passwordHash" = ${hashToUse} WHERE id = ${user.id}
-              `;
-              // Re-check after update
-              await new Promise((resolve) => setTimeout(resolve, 200));
-              const recheck = await prisma.$queryRaw<
-                Array<{ id: string; email: string; passwordHash: string | null }>
-              >`
-                SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
-              `;
-              if (recheck && recheck.length > 0 && recheck[0].passwordHash) {
+              await tx.user.update({
+                where: { id: user.id },
+                data: { passwordHash: hashToUse },
+              });
+              // Re-check after update within same transaction
+              const recheck = await tx.user.findUnique({
+                where: { email },
+              });
+              if (recheck && recheck.passwordHash) {
                 userHasPasswordHash = true;
-                break;
+                return;
               }
-            } catch {
-              // Continue to next attempt
             }
           }
-        }
+
+          // Strategy 2: Try raw SQL query by email (bypasses some caching)
+          if (!userVisibleByEmail || !userHasPasswordHash) {
+            const emailCheck = await tx.$queryRaw<
+              Array<{ id: string; email: string; passwordHash: string | null }>
+            >`
+              SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
+            `;
+
+            if (emailCheck && emailCheck.length > 0 && emailCheck[0].id === user.id) {
+              userVisibleByEmail = true;
+              // CRITICAL: Also check password hash is present
+              if (emailCheck[0].passwordHash) {
+                userHasPasswordHash = true;
+                return;
+              } else {
+                // Password hash missing - try to update it within transaction
+                const hashToUse = expectedPasswordHash || (await bcrypt.hash('password123', 10));
+                await tx.$executeRaw`
+                  UPDATE "User" SET "passwordHash" = ${hashToUse} WHERE id = ${user.id}
+                `;
+                // Re-check after update within same transaction
+                const recheck = await tx.$queryRaw<
+                  Array<{ id: string; email: string; passwordHash: string | null }>
+                >`
+                  SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
+                `;
+                if (recheck && recheck.length > 0 && recheck[0].passwordHash) {
+                  userHasPasswordHash = true;
+                  return;
+                }
+              }
+            }
+          }
+        },
+        {
+          isolationLevel: 'ReadCommitted',
+          timeout: 5000,
+        },
+      );
+
+      if (userVisibleByEmail && userHasPasswordHash) {
+        break;
       }
     } catch {
       // Continue to next attempt
@@ -139,72 +142,80 @@ export async function createTestUserAndLogin(
     // Force connection refresh
     await prisma.$executeRaw`SELECT 1`;
 
-    // Final check and update if needed - try all strategies
+    // Final check and update if needed - try all strategies using transaction
     let finalCheckPassed = false;
     try {
-      // Strategy 1: Try Prisma findUnique by email
-      const finalPrismaCheck = await prisma.user.findUnique({
-        where: { email },
-      });
-      if (finalPrismaCheck && finalPrismaCheck.id === user.id) {
-        userVisibleByEmail = true;
-        if (finalPrismaCheck.passwordHash) {
-          userHasPasswordHash = true;
-          finalCheckPassed = true;
-        } else {
-          // Update password hash one more time
-          const hashToUse = expectedPasswordHash || (await bcrypt.hash('password123', 10));
-          await prisma.user.update({
-            where: { id: user.id },
-            data: { passwordHash: hashToUse },
-          });
-          // Small delay after update
-          await new Promise((resolve) => setTimeout(resolve, 300));
-          // Re-check after update
-          const recheck = await prisma.user.findUnique({
+      await prisma.$transaction(
+        async (tx) => {
+          // Strategy 1: Try Prisma findUnique by email
+          const finalPrismaCheck = await tx.user.findUnique({
             where: { email },
           });
-          if (recheck && recheck.passwordHash) {
-            userHasPasswordHash = true;
-            finalCheckPassed = true;
+          if (finalPrismaCheck && finalPrismaCheck.id === user.id) {
+            userVisibleByEmail = true;
+            if (finalPrismaCheck.passwordHash) {
+              userHasPasswordHash = true;
+              finalCheckPassed = true;
+              return;
+            } else {
+              // Update password hash one more time within transaction
+              const hashToUse = expectedPasswordHash || (await bcrypt.hash('password123', 10));
+              await tx.user.update({
+                where: { id: user.id },
+                data: { passwordHash: hashToUse },
+              });
+              // Re-check after update within same transaction
+              const recheck = await tx.user.findUnique({
+                where: { email },
+              });
+              if (recheck && recheck.passwordHash) {
+                userHasPasswordHash = true;
+                finalCheckPassed = true;
+                return;
+              }
+            }
           }
-        }
-      }
 
-      // Strategy 2: Try raw SQL if Prisma didn't work
-      if (!finalCheckPassed) {
-        const finalEmailCheck = await prisma.$queryRaw<
-          Array<{ id: string; email: string; passwordHash: string | null }>
-        >`
-          SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
-        `;
-
-        if (finalEmailCheck && finalEmailCheck.length > 0 && finalEmailCheck[0].id === user.id) {
-          userVisibleByEmail = true;
-          if (finalEmailCheck[0].passwordHash) {
-            userHasPasswordHash = true;
-            finalCheckPassed = true;
-          } else {
-            // Update password hash one more time
-            const hashToUse = expectedPasswordHash || (await bcrypt.hash('password123', 10));
-            await prisma.$executeRaw`
-              UPDATE "User" SET "passwordHash" = ${hashToUse} WHERE id = ${user.id}
-            `;
-            // Small delay after update
-            await new Promise((resolve) => setTimeout(resolve, 300));
-            // Re-check after update
-            const recheck = await prisma.$queryRaw<
+          // Strategy 2: Try raw SQL if Prisma didn't work
+          if (!finalCheckPassed) {
+            const finalEmailCheck = await tx.$queryRaw<
               Array<{ id: string; email: string; passwordHash: string | null }>
             >`
               SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
             `;
-            if (recheck && recheck.length > 0 && recheck[0].passwordHash) {
-              userHasPasswordHash = true;
-              finalCheckPassed = true;
+
+            if (finalEmailCheck && finalEmailCheck.length > 0 && finalEmailCheck[0].id === user.id) {
+              userVisibleByEmail = true;
+              if (finalEmailCheck[0].passwordHash) {
+                userHasPasswordHash = true;
+                finalCheckPassed = true;
+                return;
+              } else {
+                // Update password hash one more time within transaction
+                const hashToUse = expectedPasswordHash || (await bcrypt.hash('password123', 10));
+                await tx.$executeRaw`
+                  UPDATE "User" SET "passwordHash" = ${hashToUse} WHERE id = ${user.id}
+                `;
+                // Re-check after update within same transaction
+                const recheck = await tx.$queryRaw<
+                  Array<{ id: string; email: string; passwordHash: string | null }>
+                >`
+                  SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
+                `;
+                if (recheck && recheck.length > 0 && recheck[0].passwordHash) {
+                  userHasPasswordHash = true;
+                  finalCheckPassed = true;
+                  return;
+                }
+              }
             }
           }
-        }
-      }
+        },
+        {
+          isolationLevel: 'ReadCommitted',
+          timeout: 5000,
+        },
+      );
     } catch {
       // Will throw error below
     }
@@ -301,54 +312,67 @@ export async function createTestUserAndLogin(
     await prisma.$executeRaw`SELECT 1`;
 
     try {
-      // Strategy 1: Try Prisma findUnique by ID and email
-      const finalCheckById = await prisma.user.findUnique({
-        where: { id: user.id },
-      });
-      const finalCheckByEmail = await prisma.user.findUnique({
-        where: { email },
-      });
+      // Use transaction with ReadCommitted isolation to ensure visibility
+      await prisma.$transaction(
+        async (tx) => {
+          // Strategy 1: Try Prisma findUnique by ID and email
+          const finalCheckById = await tx.user.findUnique({
+            where: { id: user.id },
+          });
+          const finalCheckByEmail = await tx.user.findUnique({
+            where: { email },
+          });
 
-      // User must be visible by both ID and email, with password hash
-      if (
-        finalCheckById &&
-        finalCheckById.id === user.id &&
-        finalCheckById.passwordHash &&
-        finalCheckByEmail &&
-        finalCheckByEmail.id === user.id &&
-        finalCheckByEmail.passwordHash
-      ) {
-        finalUserCheck = true;
+          // User must be visible by both ID and email, with password hash
+          if (
+            finalCheckById &&
+            finalCheckById.id === user.id &&
+            finalCheckById.passwordHash &&
+            finalCheckByEmail &&
+            finalCheckByEmail.id === user.id &&
+            finalCheckByEmail.passwordHash
+          ) {
+            finalUserCheck = true;
+            return;
+          }
+
+          // Strategy 2: Try raw SQL if Prisma didn't work
+          if (!finalUserCheck) {
+            const finalCheckByIdRaw = await tx.$queryRaw<
+              Array<{ id: string; passwordHash: string | null }>
+            >`
+              SELECT id, "passwordHash" FROM "User" WHERE id = ${user.id} LIMIT 1
+            `;
+
+            const finalCheckByEmailRaw = await tx.$queryRaw<
+              Array<{ id: string; email: string; passwordHash: string | null }>
+            >`
+              SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
+            `;
+
+            if (
+              finalCheckByIdRaw &&
+              finalCheckByIdRaw.length > 0 &&
+              finalCheckByIdRaw[0].id === user.id &&
+              finalCheckByIdRaw[0].passwordHash &&
+              finalCheckByEmailRaw &&
+              finalCheckByEmailRaw.length > 0 &&
+              finalCheckByEmailRaw[0].id === user.id &&
+              finalCheckByEmailRaw[0].passwordHash
+            ) {
+              finalUserCheck = true;
+              return;
+            }
+          }
+        },
+        {
+          isolationLevel: 'ReadCommitted',
+          timeout: 5000,
+        },
+      );
+
+      if (finalUserCheck) {
         break;
-      }
-
-      // Strategy 2: Try raw SQL if Prisma didn't work
-      if (!finalUserCheck) {
-        const finalCheckByIdRaw = await prisma.$queryRaw<
-          Array<{ id: string; passwordHash: string | null }>
-        >`
-          SELECT id, "passwordHash" FROM "User" WHERE id = ${user.id} LIMIT 1
-        `;
-
-        const finalCheckByEmailRaw = await prisma.$queryRaw<
-          Array<{ id: string; email: string; passwordHash: string | null }>
-        >`
-          SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
-        `;
-
-        if (
-          finalCheckByIdRaw &&
-          finalCheckByIdRaw.length > 0 &&
-          finalCheckByIdRaw[0].id === user.id &&
-          finalCheckByIdRaw[0].passwordHash &&
-          finalCheckByEmailRaw &&
-          finalCheckByEmailRaw.length > 0 &&
-          finalCheckByEmailRaw[0].id === user.id &&
-          finalCheckByEmailRaw[0].passwordHash
-        ) {
-          finalUserCheck = true;
-          break;
-        }
       }
     } catch (error) {
       // Continue to next attempt
@@ -361,49 +385,72 @@ export async function createTestUserAndLogin(
 
   // CRITICAL: Throw error if user is not visible - this function must guarantee visibility
   if (!finalUserCheck) {
-    // One final attempt with longer delay - try all strategies
+    // One final attempt with longer delay - try all strategies using transaction
     await new Promise((resolve) => setTimeout(resolve, 1500));
     await prisma.$executeRaw`SELECT 1`;
 
-    // Strategy 1: Try Prisma findUnique
-    const lastCheckById = await prisma.user.findUnique({
-      where: { id: user.id },
-    });
-    const lastCheckByEmail = await prisma.user.findUnique({
-      where: { email },
-    });
+    let visibleByIdRaw = false;
+    let visibleByEmailRaw = false;
 
-    const visibleById = lastCheckById && lastCheckById.passwordHash;
-    const visibleByEmail = lastCheckByEmail && lastCheckByEmail.passwordHash;
+    try {
+      await prisma.$transaction(
+        async (tx) => {
+          // Strategy 1: Try Prisma findUnique
+          const lastCheckById = await tx.user.findUnique({
+            where: { id: user.id },
+          });
+          const lastCheckByEmail = await tx.user.findUnique({
+            where: { email },
+          });
 
-    // Strategy 2: Try raw SQL if Prisma didn't work
-    if (!visibleById || !visibleByEmail) {
-      const lastCheckByIdRaw = await prisma.$queryRaw<
-        Array<{ id: string; passwordHash: string | null }>
-      >`
-        SELECT id, "passwordHash" FROM "User" WHERE id = ${user.id} LIMIT 1
-      `;
+          const visibleById = lastCheckById && lastCheckById.passwordHash;
+          const visibleByEmail = lastCheckByEmail && lastCheckByEmail.passwordHash;
 
-      const lastCheckByEmailRaw = await prisma.$queryRaw<
-        Array<{ id: string; email: string; passwordHash: string | null }>
-      >`
-        SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
-      `;
+          if (visibleById && visibleByEmail) {
+            visibleByIdRaw = true;
+            visibleByEmailRaw = true;
+            return;
+          }
 
-      const visibleByIdRaw =
-        lastCheckByIdRaw && lastCheckByIdRaw.length > 0 && lastCheckByIdRaw[0].passwordHash;
-      const visibleByEmailRaw =
-        lastCheckByEmailRaw &&
-        lastCheckByEmailRaw.length > 0 &&
-        lastCheckByEmailRaw[0].passwordHash;
+          // Strategy 2: Try raw SQL if Prisma didn't work
+          const lastCheckByIdRaw = await tx.$queryRaw<
+            Array<{ id: string; passwordHash: string | null }>
+          >`
+            SELECT id, "passwordHash" FROM "User" WHERE id = ${user.id} LIMIT 1
+          `;
 
-      if (!visibleByIdRaw || !visibleByEmailRaw) {
-        throw new Error(
-          `createTestUserAndLogin failed: User ${email} (ID: ${user.id}) is not fully visible after login. ` +
-            `Visible by ID: ${visibleByIdRaw}, Visible by Email: ${visibleByEmailRaw}. ` +
-            `This indicates a database visibility issue that must be fixed in the helper, not with defensive checks in tests.`,
-        );
-      }
+          const lastCheckByEmailRaw = await tx.$queryRaw<
+            Array<{ id: string; email: string; passwordHash: string | null }>
+          >`
+            SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
+          `;
+
+          visibleByIdRaw =
+            lastCheckByIdRaw && lastCheckByIdRaw.length > 0 && lastCheckByIdRaw[0].passwordHash
+              ? true
+              : false;
+          visibleByEmailRaw =
+            lastCheckByEmailRaw &&
+            lastCheckByEmailRaw.length > 0 &&
+            lastCheckByEmailRaw[0].passwordHash
+              ? true
+              : false;
+        },
+        {
+          isolationLevel: 'ReadCommitted',
+          timeout: 5000,
+        },
+      );
+    } catch {
+      // Will throw error below if still not visible
+    }
+
+    if (!visibleByIdRaw || !visibleByEmailRaw) {
+      throw new Error(
+        `createTestUserAndLogin failed: User ${email} (ID: ${user.id}) is not fully visible after login. ` +
+          `Visible by ID: ${visibleByIdRaw}, Visible by Email: ${visibleByEmailRaw}. ` +
+          `This indicates a database visibility issue that must be fixed in the helper, not with defensive checks in tests.`,
+      );
     }
   }
 
@@ -424,43 +471,52 @@ export async function createTestUser(email: string, role: 'USER' | 'ADMIN' = 'US
   }
 
   try {
-    // Direct upsert (no transaction wrapper) - upsert is already atomic
-    // Transaction wrappers can cause visibility issues across connection pools in CI
-    const user = await prisma.user.upsert({
-      where: { email },
-      update: {
-        // Update role and password in case user already exists with different values
-        role,
-        passwordHash, // Ensure password hash is always set
-        name: 'Test User',
-      },
-      create: {
-        email,
-        name: 'Test User',
-        passwordHash, // Ensure password hash is always set
-        role,
-      },
-    });
+    // Use transaction with ReadCommitted isolation to ensure visibility
+    // This ensures the create and verification happen in a way that guarantees visibility
+    const user = await prisma.$transaction(
+      async (tx) => {
+        // Upsert user
+        const upsertedUser = await tx.user.upsert({
+          where: { email },
+          update: {
+            // Update role and password in case user already exists with different values
+            role,
+            passwordHash, // Ensure password hash is always set
+            name: 'Test User',
+          },
+          create: {
+            email,
+            name: 'Test User',
+            passwordHash, // Ensure password hash is always set
+            role,
+          },
+        });
 
-    // Verify user was created/updated
-    if (!user || !user.id) {
-      throw new Error(`Failed to create/update user with email ${email}`);
-    }
+        // Verify user was created/updated
+        if (!upsertedUser || !upsertedUser.id) {
+          throw new Error(`Failed to create/update user with email ${email}`);
+        }
 
-    // CRITICAL: Verify password hash was set correctly
-    // If missing, update it explicitly and ensure it's stored in user object
-    if (!user.passwordHash) {
-      // If password hash is missing, update it explicitly
-      const updatedUser = await prisma.user.update({
-        where: { id: user.id },
-        data: { passwordHash },
-      });
-      if (!updatedUser.passwordHash) {
-        throw new Error(`Password hash not set for user ${email} (ID: ${user.id})`);
-      }
-      // Use updated user - ensure passwordHash is in the returned object
-      user.passwordHash = updatedUser.passwordHash;
-    }
+        // CRITICAL: Verify password hash was set correctly within transaction
+        if (!upsertedUser.passwordHash) {
+          // If password hash is missing, update it explicitly
+          const updatedUser = await tx.user.update({
+            where: { id: upsertedUser.id },
+            data: { passwordHash },
+          });
+          if (!updatedUser.passwordHash) {
+            throw new Error(`Password hash not set for user ${email} (ID: ${upsertedUser.id})`);
+          }
+          return updatedUser;
+        }
+
+        return upsertedUser;
+      },
+      {
+        isolationLevel: 'ReadCommitted',
+        timeout: 10000, // 10 second timeout
+      },
+    );
 
     // Ensure passwordHash is always set in the returned user object
     if (!user.passwordHash) {
@@ -471,109 +527,122 @@ export async function createTestUser(email: string, role: 'USER' | 'ADMIN' = 'US
     // This helps ensure subsequent queries use a fresh connection
     await prisma.$executeRaw`SELECT 1`;
 
-    // Delay to ensure commit is visible - upsert is atomic and commits immediately
+    // Delay to ensure commit is visible - transaction commits, but connection pool may cache
     // Increased delay for CI environments where connection pool visibility can be slower
-    await new Promise((resolve) => setTimeout(resolve, 800));
+    await new Promise((resolve) => setTimeout(resolve, 1000));
 
     // CRITICAL: Verify user is visible by email (same query as login endpoint)
     // This ensures the user can be found when login attempts to query by email
-    // Use multiple verification strategies: Prisma findUnique, raw SQL, and findFirst
+    // Use transaction with ReadCommitted isolation to ensure we see committed data
     let verifyUser = null;
     let verifyUserByEmail = null;
-    const quickVerificationAttempts = 15; // Increased for CI reliability
+    const quickVerificationAttempts = 20; // Increased for CI reliability
 
     for (let attempt = 0; attempt < quickVerificationAttempts; attempt++) {
       if (attempt > 0) {
         // Exponential backoff with longer delays for CI
-        await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
+        await new Promise((resolve) => setTimeout(resolve, 300 * attempt));
       }
 
       // Force connection refresh before each verification attempt
       await prisma.$executeRaw`SELECT 1`;
 
       try {
-        // Strategy 1: Try Prisma findUnique by ID first
-        const prismaCheckById = await prisma.user.findUnique({
-          where: { id: user.id },
-        });
-        if (prismaCheckById && prismaCheckById.id === user.id) {
-          verifyUser = {
-            id: prismaCheckById.id,
-            email: prismaCheckById.email,
-            passwordHash: prismaCheckById.passwordHash,
-          };
-        }
-
-        // Strategy 2: Try Prisma findUnique by email (same as login endpoint)
-        const prismaCheckByEmail = await prisma.user.findUnique({
-          where: { email },
-        });
-        if (prismaCheckByEmail && prismaCheckByEmail.id === user.id) {
-          verifyUserByEmail = {
-            id: prismaCheckByEmail.id,
-            email: prismaCheckByEmail.email,
-            passwordHash: prismaCheckByEmail.passwordHash,
-          };
-        }
-
-        // Strategy 3: Try raw SQL query by ID (bypasses some caching)
-        if (!verifyUser) {
-          const idResult = await prisma.$queryRaw<
-            Array<{ id: string; email: string; passwordHash: string | null }>
-          >`
-            SELECT id, email, "passwordHash" FROM "User" WHERE id = ${user.id} LIMIT 1
-          `;
-
-          if (idResult && idResult.length > 0) {
-            verifyUser = idResult[0];
-          }
-        }
-
-        // Strategy 4: Try raw SQL query by email (same as login endpoint)
-        if (!verifyUserByEmail) {
-          const emailResult = await prisma.$queryRaw<
-            Array<{ id: string; email: string; passwordHash: string | null }>
-          >`
-            SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
-          `;
-
-          if (emailResult && emailResult.length > 0 && emailResult[0].id === user.id) {
-            verifyUserByEmail = emailResult[0];
-          }
-        }
-
-        // Verify password hash is set for email check (critical for login)
-        if (verifyUserByEmail && !verifyUserByEmail.passwordHash) {
-          // Password hash missing - update it
-          await prisma.user.update({
-            where: { id: user.id },
-            data: { passwordHash },
-          });
-          // Re-query to get updated user using all strategies
-          await new Promise((resolve) => setTimeout(resolve, 200));
-          const recheckPrisma = await prisma.user.findUnique({
-            where: { email },
-          });
-          if (recheckPrisma && recheckPrisma.passwordHash) {
-            verifyUserByEmail = {
-              id: recheckPrisma.id,
-              email: recheckPrisma.email,
-              passwordHash: recheckPrisma.passwordHash,
-            };
-          } else {
-            const recheck = await prisma.$queryRaw<
-              Array<{ id: string; email: string; passwordHash: string | null }>
-            >`
-              SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
-            `;
-            if (recheck && recheck.length > 0 && recheck[0].passwordHash) {
-              verifyUserByEmail = recheck[0];
+        // Use transaction with ReadCommitted isolation to ensure visibility
+        // This ensures we use a connection that can see the committed data
+        await prisma.$transaction(
+          async (tx) => {
+            // Strategy 1: Try Prisma findUnique by ID first
+            const prismaCheckById = await tx.user.findUnique({
+              where: { id: user.id },
+            });
+            if (prismaCheckById && prismaCheckById.id === user.id && prismaCheckById.passwordHash) {
+              verifyUser = {
+                id: prismaCheckById.id,
+                email: prismaCheckById.email,
+                passwordHash: prismaCheckById.passwordHash,
+              };
             }
-          }
-        }
+
+            // Strategy 2: Try Prisma findUnique by email (same as login endpoint)
+            const prismaCheckByEmail = await tx.user.findUnique({
+              where: { email },
+            });
+            if (
+              prismaCheckByEmail &&
+              prismaCheckByEmail.id === user.id &&
+              prismaCheckByEmail.passwordHash
+            ) {
+              verifyUserByEmail = {
+                id: prismaCheckByEmail.id,
+                email: prismaCheckByEmail.email,
+                passwordHash: prismaCheckByEmail.passwordHash,
+              };
+            }
+
+            // Strategy 3: Try raw SQL query by ID (bypasses some caching)
+            if (!verifyUser) {
+              const idResult = await tx.$queryRaw<
+                Array<{ id: string; email: string; passwordHash: string | null }>
+              >`
+                SELECT id, email, "passwordHash" FROM "User" WHERE id = ${user.id} LIMIT 1
+              `;
+
+              if (idResult && idResult.length > 0 && idResult[0].passwordHash) {
+                verifyUser = idResult[0];
+              }
+            }
+
+            // Strategy 4: Try raw SQL query by email (same as login endpoint)
+            if (!verifyUserByEmail) {
+              const emailResult = await tx.$queryRaw<
+                Array<{ id: string; email: string; passwordHash: string | null }>
+              >`
+                SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
+              `;
+
+              if (
+                emailResult &&
+                emailResult.length > 0 &&
+                emailResult[0].id === user.id &&
+                emailResult[0].passwordHash
+              ) {
+                verifyUserByEmail = emailResult[0];
+              }
+            }
+
+            // If password hash is missing, update it within transaction
+            if (verifyUserByEmail && !verifyUserByEmail.passwordHash) {
+              await tx.user.update({
+                where: { id: user.id },
+                data: { passwordHash },
+              });
+              // Re-query to get updated user
+              const recheck = await tx.user.findUnique({
+                where: { email },
+              });
+              if (recheck && recheck.passwordHash) {
+                verifyUserByEmail = {
+                  id: recheck.id,
+                  email: recheck.email,
+                  passwordHash: recheck.passwordHash,
+                };
+              }
+            }
+          },
+          {
+            isolationLevel: 'ReadCommitted',
+            timeout: 5000,
+          },
+        );
 
         // If both verifications pass with password hash, we're good
-        if (verifyUser && verifyUserByEmail && verifyUserByEmail.passwordHash) {
+        if (
+          verifyUser &&
+          verifyUser.passwordHash &&
+          verifyUserByEmail &&
+          verifyUserByEmail.passwordHash
+        ) {
           break;
         }
       } catch (error) {
@@ -698,28 +767,44 @@ export async function createTestCategory(name: string, slug?: string) {
   // 2. cleanupDatabase() already handles proper deletion order
   // 3. Upsert is atomic and doesn't violate foreign key constraints
   try {
-    // Direct upsert (no transaction wrapper) - upsert is already atomic
-    // Transaction wrappers can cause visibility issues across connection pools in CI
-    const category = await prisma.category.upsert({
-      where: { slug: categorySlug },
-      update: {
-        // Update name in case slug matches but name is different
-        name,
-      },
-      create: {
-        name,
-        slug: categorySlug,
-      },
-    });
+    // Use transaction with ReadCommitted isolation to ensure visibility
+    const category = await prisma.$transaction(
+      async (tx) => {
+        // Upsert category
+        const upsertedCategory = await tx.category.upsert({
+          where: { slug: categorySlug },
+          update: {
+            // Update name in case slug matches but name is different
+            name,
+          },
+          create: {
+            name,
+            slug: categorySlug,
+          },
+        });
 
-    // Verify category was created/updated
-    if (!category || !category.id) {
-      throw new Error(`Failed to create/update category with slug ${categorySlug}`);
-    }
+        // Verify category was created/updated
+        if (!upsertedCategory || !upsertedCategory.id) {
+          throw new Error(`Failed to create/update category with slug ${categorySlug}`);
+        }
+
+        return upsertedCategory;
+      },
+      {
+        isolationLevel: 'ReadCommitted',
+        timeout: 10000, // 10 second timeout
+      },
+    );
+
+    // Force connection refresh
+    await prisma.$executeRaw`SELECT 1`;
+
+    // Delay to ensure commit is visible
+    await new Promise((resolve) => setTimeout(resolve, 1000));
 
     // CRITICAL: Verify category is visible - this function must guarantee visibility
     // This prevents FK violations when creating products that reference this category
-    // Use multiple verification strategies: raw SQL, Prisma findUnique, and findFirst
+    // Use transaction with ReadCommitted isolation to ensure we see committed data
     const verificationStartTime = Date.now();
     const verificationTimeoutMs = 15000; // 15 seconds for verification (increased for CI)
     const verificationMaxAttempts = 30; // More attempts for reliability
@@ -733,38 +818,57 @@ export async function createTestCategory(name: string, slug?: string) {
 
       if (attempt > 0) {
         // Exponential backoff: 100ms, 200ms, 300ms, etc.
-        await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+        await new Promise((resolve) => setTimeout(resolve, 300 * attempt));
       }
 
       // Force connection refresh before each check
       await prisma.$executeRaw`SELECT 1`;
 
       try {
-        // Strategy 1: Try Prisma findUnique first (uses connection pool)
-        const prismaCheck = await prisma.category.findUnique({
-          where: { id: category.id },
-        });
-        if (prismaCheck && prismaCheck.id === category.id) {
-          verifyCategory = prismaCheck;
-          break;
-        }
+        // Use transaction with ReadCommitted isolation to ensure visibility
+        await prisma.$transaction(
+          async (tx) => {
+            // Strategy 1: Try Prisma findUnique first (uses connection pool)
+            const prismaCheck = await tx.category.findUnique({
+              where: { id: category.id },
+            });
+            if (prismaCheck && prismaCheck.id === category.id) {
+              verifyCategory = prismaCheck;
+              return;
+            }
 
-        // Strategy 2: Try raw SQL query (bypasses some caching)
-        const idResult = await prisma.$queryRaw<Array<{ id: string; name: string; slug: string }>>`
-          SELECT id, name, slug FROM "Category" WHERE id = ${category.id} LIMIT 1
-        `;
+            // Strategy 2: Try raw SQL query (bypasses some caching)
+            const idResult = await tx.$queryRaw<
+              Array<{ id: string; name: string; slug: string }>
+            >`
+              SELECT id, name, slug FROM "Category" WHERE id = ${category.id} LIMIT 1
+            `;
 
-        if (idResult && idResult.length > 0 && idResult[0].id === category.id) {
-          verifyCategory = { id: idResult[0].id, name: idResult[0].name, slug: idResult[0].slug };
-          break;
-        }
+            if (idResult && idResult.length > 0 && idResult[0].id === category.id) {
+              verifyCategory = {
+                id: idResult[0].id,
+                name: idResult[0].name,
+                slug: idResult[0].slug,
+              };
+              return;
+            }
 
-        // Strategy 3: Try findFirst by slug as fallback
-        const slugCheck = await prisma.category.findFirst({
-          where: { slug: categorySlug },
-        });
-        if (slugCheck && slugCheck.id === category.id) {
-          verifyCategory = slugCheck;
+            // Strategy 3: Try findFirst by slug as fallback
+            const slugCheck = await tx.category.findFirst({
+              where: { slug: categorySlug },
+            });
+            if (slugCheck && slugCheck.id === category.id) {
+              verifyCategory = slugCheck;
+              return;
+            }
+          },
+          {
+            isolationLevel: 'ReadCommitted',
+            timeout: 5000,
+          },
+        );
+
+        if (verifyCategory) {
           break;
         }
       } catch (error) {
@@ -777,23 +881,46 @@ export async function createTestCategory(name: string, slug?: string) {
 
     // CRITICAL: Throw error if category is not visible - this function must guarantee visibility
     if (!verifyCategory) {
-      // One final attempt with longer delay and all strategies
+      // One final attempt with longer delay and all strategies using transaction
       await new Promise((resolve) => setTimeout(resolve, 1500));
       await prisma.$executeRaw`SELECT 1`;
 
-      // Try all strategies one more time
-      const finalPrismaCheck = await prisma.category.findUnique({
-        where: { id: category.id },
-      });
-      if (finalPrismaCheck && finalPrismaCheck.id === category.id) {
-        return category;
+      try {
+        await prisma.$transaction(
+          async (tx) => {
+            // Try all strategies one more time
+            const finalPrismaCheck = await tx.category.findUnique({
+              where: { id: category.id },
+            });
+            if (finalPrismaCheck && finalPrismaCheck.id === category.id) {
+              verifyCategory = finalPrismaCheck;
+              return;
+            }
+
+            const lastCheck = await tx.$queryRaw<
+              Array<{ id: string; name: string; slug: string }>
+            >`
+              SELECT id, name, slug FROM "Category" WHERE id = ${category.id} LIMIT 1
+            `;
+
+            if (lastCheck && lastCheck.length > 0 && lastCheck[0].id === category.id) {
+              verifyCategory = {
+                id: lastCheck[0].id,
+                name: lastCheck[0].name,
+                slug: lastCheck[0].slug,
+              };
+            }
+          },
+          {
+            isolationLevel: 'ReadCommitted',
+            timeout: 5000,
+          },
+        );
+      } catch {
+        // Will throw error below if still not found
       }
 
-      const lastCheck = await prisma.$queryRaw<Array<{ id: string; name: string; slug: string }>>`
-        SELECT id, name, slug FROM "Category" WHERE id = ${category.id} LIMIT 1
-      `;
-
-      if (!lastCheck || lastCheck.length === 0 || lastCheck[0].id !== category.id) {
+      if (!verifyCategory) {
         throw new Error(
           `createTestCategory failed: Category ${name} (ID: ${category.id}, slug: ${categorySlug}) is not visible after creation. ` +
             `This indicates a database visibility issue that must be fixed in the helper.`,
@@ -892,31 +1019,42 @@ export async function createTestProduct(
   const baseSlug = data?.slug || (data?.title || 'test-product').toLowerCase().replace(/\s+/g, '-');
   const uniqueSlug = `${baseSlug}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 
-  // Create the product
-  const product = await prisma.product.create({
-    data: {
-      title: data?.title || 'Test Product',
-      slug: uniqueSlug,
-      description: 'Test product description',
-      priceCents: data?.priceCents || 1000,
-      currency: 'USD',
-      images: [],
-      active: data?.active !== undefined ? data.active : true,
-      stock: data?.stock || 10,
-      categoryId,
-    },
-  });
+  // Use transaction with ReadCommitted isolation to ensure visibility
+  const product = await prisma.$transaction(
+    async (tx) => {
+      // Create the product
+      const createdProduct = await tx.product.create({
+        data: {
+          title: data?.title || 'Test Product',
+          slug: uniqueSlug,
+          description: 'Test product description',
+          priceCents: data?.priceCents || 1000,
+          currency: 'USD',
+          images: [],
+          active: data?.active !== undefined ? data.active : true,
+          stock: data?.stock || 10,
+          categoryId,
+        },
+      });
 
-  // Verify product was created
-  if (!product || !product.id) {
-    throw new Error(`Failed to create product with slug ${uniqueSlug}`);
-  }
+      // Verify product was created
+      if (!createdProduct || !createdProduct.id) {
+        throw new Error(`Failed to create product with slug ${uniqueSlug}`);
+      }
+
+      return createdProduct;
+    },
+    {
+      isolationLevel: 'ReadCommitted',
+      timeout: 10000, // 10 second timeout
+    },
+  );
 
   // Force connection refresh
   await prisma.$executeRaw`SELECT 1`;
 
-  // Delay to ensure commit is visible
-  await new Promise((resolve) => setTimeout(resolve, 400));
+  // Delay to ensure commit is visible - transaction commits, but connection pool may cache
+  await new Promise((resolve) => setTimeout(resolve, 1000));
 
   // CRITICAL: Verify product is visible - this function must guarantee visibility
   // This prevents FK violations when creating orders/reviews that reference this product
@@ -941,35 +1079,48 @@ export async function createTestProduct(
     await prisma.$executeRaw`SELECT 1`;
 
     try {
-      // Strategy 1: Try Prisma findUnique first (uses connection pool)
-      const prismaCheck = await prisma.product.findUnique({
-        where: { id: product.id },
-      });
-      if (prismaCheck && prismaCheck.id === product.id) {
-        verifyProduct = prismaCheck;
-        break;
-      }
+      // Use transaction with ReadCommitted isolation to ensure visibility
+      await prisma.$transaction(
+        async (tx) => {
+          // Strategy 1: Try Prisma findUnique first (uses connection pool)
+          const prismaCheck = await tx.product.findUnique({
+            where: { id: product.id },
+          });
+          if (prismaCheck && prismaCheck.id === product.id) {
+            verifyProduct = prismaCheck;
+            return;
+          }
 
-      // Strategy 2: Try raw SQL query (bypasses some caching)
-      const idResult = await prisma.$queryRaw<Array<{ id: string; title: string; slug: string }>>`
-        SELECT id, title, slug FROM "Product" WHERE id = ${product.id} LIMIT 1
-      `;
+          // Strategy 2: Try raw SQL query (bypasses some caching)
+          const idResult = await tx.$queryRaw<Array<{ id: string; title: string; slug: string }>>`
+            SELECT id, title, slug FROM "Product" WHERE id = ${product.id} LIMIT 1
+          `;
 
-      if (idResult && idResult.length > 0 && idResult[0].id === product.id) {
-        verifyProduct = {
-          id: idResult[0].id,
-          title: idResult[0].title,
-          slug: idResult[0].slug,
-        };
-        break;
-      }
+          if (idResult && idResult.length > 0 && idResult[0].id === product.id) {
+            verifyProduct = {
+              id: idResult[0].id,
+              title: idResult[0].title,
+              slug: idResult[0].slug,
+            };
+            return;
+          }
 
-      // Strategy 3: Try findFirst by slug as fallback
-      const slugCheck = await prisma.product.findFirst({
-        where: { slug: uniqueSlug },
-      });
-      if (slugCheck && slugCheck.id === product.id) {
-        verifyProduct = slugCheck;
+          // Strategy 3: Try findFirst by slug as fallback
+          const slugCheck = await tx.product.findFirst({
+            where: { slug: uniqueSlug },
+          });
+          if (slugCheck && slugCheck.id === product.id) {
+            verifyProduct = slugCheck;
+            return;
+          }
+        },
+        {
+          isolationLevel: 'ReadCommitted',
+          timeout: 5000,
+        },
+      );
+
+      if (verifyProduct) {
         break;
       }
     } catch (error) {
@@ -982,23 +1133,46 @@ export async function createTestProduct(
 
   // CRITICAL: Throw error if product is not visible - this function must guarantee visibility
   if (!verifyProduct) {
-    // One final attempt with longer delay and all strategies
+    // One final attempt with longer delay and all strategies using transaction
     await new Promise((resolve) => setTimeout(resolve, 1500));
     await prisma.$executeRaw`SELECT 1`;
 
-    // Try all strategies one more time
-    const finalPrismaCheck = await prisma.product.findUnique({
-      where: { id: product.id },
-    });
-    if (finalPrismaCheck && finalPrismaCheck.id === product.id) {
-      return product;
+    try {
+      await prisma.$transaction(
+        async (tx) => {
+          // Try all strategies one more time
+          const finalPrismaCheck = await tx.product.findUnique({
+            where: { id: product.id },
+          });
+          if (finalPrismaCheck && finalPrismaCheck.id === product.id) {
+            verifyProduct = finalPrismaCheck;
+            return;
+          }
+
+          const lastCheck = await tx.$queryRaw<
+            Array<{ id: string; title: string; slug: string }>
+          >`
+            SELECT id, title, slug FROM "Product" WHERE id = ${product.id} LIMIT 1
+          `;
+
+          if (lastCheck && lastCheck.length > 0 && lastCheck[0].id === product.id) {
+            verifyProduct = {
+              id: lastCheck[0].id,
+              title: lastCheck[0].title,
+              slug: lastCheck[0].slug,
+            };
+          }
+        },
+        {
+          isolationLevel: 'ReadCommitted',
+          timeout: 5000,
+        },
+      );
+    } catch {
+      // Will throw error below if still not found
     }
 
-    const lastCheck = await prisma.$queryRaw<Array<{ id: string; title: string; slug: string }>>`
-      SELECT id, title, slug FROM "Product" WHERE id = ${product.id} LIMIT 1
-    `;
-
-    if (!lastCheck || lastCheck.length === 0 || lastCheck[0].id !== product.id) {
+    if (!verifyProduct) {
       throw new Error(
         `createTestProduct failed: Product ${product.title} (ID: ${product.id}, slug: ${uniqueSlug}) is not visible after creation. ` +
           `This indicates a database visibility issue that must be fixed in the helper.`,
