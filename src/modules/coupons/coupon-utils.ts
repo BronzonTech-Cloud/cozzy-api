@@ -47,7 +47,8 @@ export async function validateAndCalculateCoupon(
   }
 
   // Check usage limit
-  if (coupon.usageLimit && coupon.usageCount >= coupon.usageLimit) {
+  // Explicitly check for null/undefined to enforce usageLimit = 0
+  if (coupon.usageLimit != null && coupon.usageCount >= coupon.usageLimit) {
     return { valid: false, discountCents: 0, error: 'Coupon usage limit reached' };
   }
 

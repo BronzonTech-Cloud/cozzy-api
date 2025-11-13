@@ -80,6 +80,81 @@ describe('Orders', () => {
 
       expect(res.status).toBe(401);
     });
+
+    it('should apply valid coupon to order', async () => {
+      // Create a valid coupon
+      const couponRes = await request(app)
+        .post('/api/v1/coupons')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          code: 'ORDER10',
+          description: '10% off',
+          discountType: 'PERCENTAGE',
+          discountValue: 10,
+          validFrom: new Date().toISOString(),
+          validUntil: new Date(Date.now() + 86400000).toISOString(),
+          active: true,
+        });
+
+      expect(couponRes.status).toBe(201);
+      const couponId = couponRes.body.coupon.id;
+
+      const res = await request(app)
+        .post('/api/v1/orders')
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({
+          items: [{ productId, quantity: 1 }],
+          couponId,
+        });
+
+      expect(res.status).toBe(201);
+      expect(res.body.order).toHaveProperty('couponId', couponId);
+      expect(res.body.order.discountCents).toBeGreaterThan(0);
+    });
+
+    it('should reject order with invalid coupon', async () => {
+      // Use a valid UUID format that doesn't exist
+      const res = await request(app)
+        .post('/api/v1/orders')
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({
+          items: [{ productId, quantity: 1 }],
+          couponId: '00000000-0000-0000-0000-000000000000',
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe('Coupon not found');
+    });
+
+    it('should reject order with expired coupon', async () => {
+      // Create an expired coupon
+      const couponRes = await request(app)
+        .post('/api/v1/coupons')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          code: 'EXPIRED10',
+          description: 'Expired coupon',
+          discountType: 'PERCENTAGE',
+          discountValue: 10,
+          validFrom: new Date(Date.now() - 172800000).toISOString(), // 2 days ago
+          validUntil: new Date(Date.now() - 86400000).toISOString(), // Yesterday
+          active: true,
+        });
+
+      expect(couponRes.status).toBe(201);
+      const couponId = couponRes.body.coupon.id;
+
+      const res = await request(app)
+        .post('/api/v1/orders')
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({
+          items: [{ productId, quantity: 1 }],
+          couponId,
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toContain('expired');
+    });
   });
 
   describe('GET /api/v1/orders', () => {

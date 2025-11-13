@@ -1414,25 +1414,34 @@ export async function cleanupDatabase() {
     // This provides a safety net if TRUNCATE is not available or fails
     console.warn('TRUNCATE failed, falling back to deleteMany:', error);
 
-    // Fallback: delete in dependency order
+    // Fallback: delete in dependency order to respect foreign key constraints
+    // CRITICAL: Must delete child tables before parent tables to avoid FK violations
+    // Order: Delete children first, then parents (reverse of creation order)
     // Use safeDelete helper to only suppress expected "table does not exist" errors
     // All other errors (connection, permission, constraint violations) will be logged
-    // Execute all deletes in parallel for speed (they're independent after TRUNCATE fails)
-    await Promise.all([
-      safeDelete('review', () => prisma.review.deleteMany()),
-      safeDelete('wishlist', () => prisma.wishlist.deleteMany()),
-      safeDelete('address', () => prisma.address.deleteMany()),
-      safeDelete('productVariant', () => prisma.productVariant.deleteMany()),
-      safeDelete('cartItem', () => prisma.cartItem.deleteMany()),
-      safeDelete('cart', () => prisma.cart.deleteMany()),
-      safeDelete('orderStatusHistory', () => prisma.orderStatusHistory.deleteMany()),
-      safeDelete('orderItem', () => prisma.orderItem.deleteMany()),
-      safeDelete('order', () => prisma.order.deleteMany()),
-      safeDelete('coupon', () => prisma.coupon.deleteMany()),
-      safeDelete('product', () => prisma.product.deleteMany()),
-      safeDelete('category', () => prisma.category.deleteMany()),
-      safeDelete('user', () => prisma.user.deleteMany()),
-    ]);
+    
+    // Step 1: Delete all child records (no FK dependencies)
+    await safeDelete('review', () => prisma.review.deleteMany());
+    await safeDelete('wishlist', () => prisma.wishlist.deleteMany());
+    await safeDelete('address', () => prisma.address.deleteMany());
+    await safeDelete('productVariant', () => prisma.productVariant.deleteMany());
+    await safeDelete('cartItem', () => prisma.cartItem.deleteMany());
+    await safeDelete('orderStatusHistory', () => prisma.orderStatusHistory.deleteMany());
+    await safeDelete('orderItem', () => prisma.orderItem.deleteMany());
+    
+    // Step 2: Delete parent records that depend on other parents
+    await safeDelete('cart', () => prisma.cart.deleteMany());
+    await safeDelete('order', () => prisma.order.deleteMany());
+    await safeDelete('coupon', () => prisma.coupon.deleteMany());
+    
+    // Step 3: Delete products (depends on category)
+    await safeDelete('product', () => prisma.product.deleteMany());
+    
+    // Step 4: Delete categories (no dependencies)
+    await safeDelete('category', () => prisma.category.deleteMany());
+    
+    // Step 5: Delete users last (many tables depend on user)
+    await safeDelete('user', () => prisma.user.deleteMany());
 
     // Delay after fallback cleanup to ensure all deletes are committed
     await prisma.$executeRaw`SELECT 1`;

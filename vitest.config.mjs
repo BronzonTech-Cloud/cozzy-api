@@ -23,10 +23,10 @@ export default defineConfig({
       reporter: ['text', 'lcov'],
       all: true,
       thresholds: {
-        lines: 69, // Adjusted to match current coverage (69.24%)
+        lines: 70, // Restored to target threshold - add tests to meet this
         functions: 70,
-        statements: 68.9, // Adjusted to match current coverage (68.93%)
-        branches: 51.6, // Adjusted to match current coverage (51.6%)
+        statements: 70, // Restored to target threshold - add tests to meet this
+        branches: 60, // Restored to target threshold - add tests to meet this
       },
     },
     // Add test timeout and retry configuration for CI stability

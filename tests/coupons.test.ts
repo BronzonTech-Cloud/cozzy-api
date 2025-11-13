@@ -358,6 +358,100 @@ describe('Coupons', () => {
 
       expect(res.status).toBe(404);
     });
+
+    it('should return 400 for negative minPurchase', async () => {
+      const res = await request(app)
+        .patch(`/api/v1/coupons/${couponId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          minPurchase: -100,
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe('minPurchase must be a non-negative integer');
+    });
+
+    it('should return 400 for negative maxDiscount', async () => {
+      const res = await request(app)
+        .patch(`/api/v1/coupons/${couponId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          maxDiscount: -50,
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe('maxDiscount must be a non-negative integer');
+    });
+
+    it('should return 400 for negative usageLimit', async () => {
+      const res = await request(app)
+        .patch(`/api/v1/coupons/${couponId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          usageLimit: -10,
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe('usageLimit must be a non-negative integer');
+    });
+
+    it('should return 400 for invalid date format', async () => {
+      const res = await request(app)
+        .patch(`/api/v1/coupons/${couponId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          validFrom: 'invalid-date',
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toContain('Invalid date format');
+    });
+
+    it('should return 400 when validUntil is before validFrom', async () => {
+      const validFrom = new Date();
+      const validUntil = new Date();
+      validUntil.setDate(validUntil.getDate() - 1); // Yesterday
+
+      const res = await request(app)
+        .patch(`/api/v1/coupons/${couponId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          validFrom: validFrom.toISOString(),
+          validUntil: validUntil.toISOString(),
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe('validUntil must be after validFrom');
+    });
+
+    it('should return 409 for duplicate coupon code', async () => {
+      // Create another coupon
+      const validFrom = new Date();
+      const validUntil = new Date();
+      validUntil.setMonth(validUntil.getMonth() + 1);
+
+      const otherCoupon = await prisma.coupon.create({
+        data: {
+          code: 'OTHER10',
+          discountType: 'PERCENTAGE',
+          discountValue: 10,
+          validFrom,
+          validUntil,
+          active: true,
+        },
+      });
+
+      // Try to update first coupon with second coupon's code
+      const res = await request(app)
+        .patch(`/api/v1/coupons/${couponId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          code: otherCoupon.code,
+        });
+
+      expect(res.status).toBe(409);
+      expect(res.body.message).toBe('Coupon code already exists');
+    });
   });
 
   describe('DELETE /api/v1/coupons/:id', () => {

@@ -13,6 +13,11 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
     });
   }
 
+  // Handle null/undefined errors
+  if (err === null || err === undefined) {
+    return res.status(500).json({ message: 'Internal Server Error' });
+  }
+
   type WithStatus = { status?: unknown };
   const maybe = err as WithStatus;
   const status = typeof maybe.status === 'number' ? (maybe.status as number) : 500;
