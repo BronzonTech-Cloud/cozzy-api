@@ -509,7 +509,7 @@ export async function createTestUser(email: string, role: 'USER' | 'ADMIN' = 'US
     // CRITICAL: Force transaction commit and wait for it to be visible
     // Execute a simple query to ensure the transaction connection is released
     await prisma.$executeRaw`SELECT 1`;
-    
+
     // Delay to ensure commit is visible - transaction commits, but connection pool may cache
     // Increased delay for CI environments where connection pool visibility can be slower
     await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -801,7 +801,7 @@ export async function createTestCategory(name: string, slug?: string) {
 
     // CRITICAL: Force transaction commit and wait for it to be visible
     await prisma.$executeRaw`SELECT 1`;
-    
+
     // Delay to ensure commit is visible
     await new Promise((resolve) => setTimeout(resolve, 1000));
 
@@ -1042,7 +1042,9 @@ export async function createTestProduct(
         where: { id: createdProduct.id },
       });
       if (!verifyInTx || verifyInTx.id !== createdProduct.id) {
-        throw new Error(`Product ${createdProduct.title} not visible within transaction after create`);
+        throw new Error(
+          `Product ${createdProduct.title} not visible within transaction after create`,
+        );
       }
 
       return createdProduct;
@@ -1064,7 +1066,7 @@ export async function createTestProduct(
   // Use multiple verification strategies: raw SQL, Prisma findUnique, and findFirst
   const productVerificationStartTime = Date.now();
   const productVerificationTimeoutMs = 15000; // 15 seconds for verification (increased for CI)
-    const productVerificationMaxAttempts = 25; // Increased for CI reliability
+  const productVerificationMaxAttempts = 25; // Increased for CI reliability
   let verifyProduct: { id: string; title: string; slug: string } | null = null;
 
   for (let attempt = 0; attempt < productVerificationMaxAttempts; attempt++) {
@@ -1419,7 +1421,7 @@ export async function cleanupDatabase() {
     // Order: Delete children first, then parents (reverse of creation order)
     // Use safeDelete helper to only suppress expected "table does not exist" errors
     // All other errors (connection, permission, constraint violations) will be logged
-    
+
     // Step 1: Delete all child records (no FK dependencies)
     await safeDelete('review', () => prisma.review.deleteMany());
     await safeDelete('wishlist', () => prisma.wishlist.deleteMany());
@@ -1428,18 +1430,18 @@ export async function cleanupDatabase() {
     await safeDelete('cartItem', () => prisma.cartItem.deleteMany());
     await safeDelete('orderStatusHistory', () => prisma.orderStatusHistory.deleteMany());
     await safeDelete('orderItem', () => prisma.orderItem.deleteMany());
-    
+
     // Step 2: Delete parent records that depend on other parents
     await safeDelete('cart', () => prisma.cart.deleteMany());
     await safeDelete('order', () => prisma.order.deleteMany());
     await safeDelete('coupon', () => prisma.coupon.deleteMany());
-    
+
     // Step 3: Delete products (depends on category)
     await safeDelete('product', () => prisma.product.deleteMany());
-    
+
     // Step 4: Delete categories (no dependencies)
     await safeDelete('category', () => prisma.category.deleteMany());
-    
+
     // Step 5: Delete users last (many tables depend on user)
     await safeDelete('user', () => prisma.user.deleteMany());
 

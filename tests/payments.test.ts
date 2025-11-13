@@ -213,9 +213,7 @@ describe('Payments', () => {
         },
       };
 
-      const res = await request(app)
-        .post('/api/v1/payments/stripe/webhook')
-        .send(mockEvent);
+      const res = await request(app).post('/api/v1/payments/stripe/webhook').send(mockEvent);
 
       expect(res.status).toBe(400);
       expect(res.text).toContain('Missing signature');

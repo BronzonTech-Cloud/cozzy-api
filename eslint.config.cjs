@@ -35,6 +35,8 @@ module.exports = [
         process: 'readonly',
         global: 'readonly',
         Buffer: 'readonly',
+        URL: 'readonly',
+        URLSearchParams: 'readonly',
       },
     },
     rules: {

@@ -18,17 +18,17 @@ const globalForPrisma = global as unknown as { prisma: PrismaClient | undefined 
 function configureDatabaseUrl(baseUrl: string, isTest: boolean): string {
   try {
     const url = new URL(baseUrl);
-    
+
     // For test/CI environments, use optimized connection pool settings
     if (isTest) {
       // Smaller connection pool for tests to avoid connection exhaustion
       // and ensure faster connection reuse, which improves data visibility
       url.searchParams.set('connection_limit', '5');
-      
+
       // Shorter pool timeout to fail fast if connections are exhausted
       // This helps identify actual connection issues vs. visibility delays
       url.searchParams.set('pool_timeout', '5');
-      
+
       // Shorter connect timeout for faster failure detection
       url.searchParams.set('connect_timeout', '3');
     } else {
@@ -41,7 +41,7 @@ function configureDatabaseUrl(baseUrl: string, isTest: boolean): string {
         url.searchParams.set('pool_timeout', '10');
       }
     }
-    
+
     return url.toString();
   } catch (error) {
     // If URL parsing fails, return original URL
@@ -52,13 +52,14 @@ function configureDatabaseUrl(baseUrl: string, isTest: boolean): string {
 
 // Use test database URL when NODE_ENV is 'test'
 const isTest = process.env.NODE_ENV === 'test';
-const baseDatabaseUrl =
-  isTest
-    ? process.env.DATABASE_URL_TEST || env.DATABASE_URL_TEST || env.DATABASE_URL
-    : env.DATABASE_URL;
+const baseDatabaseUrl = isTest
+  ? process.env.DATABASE_URL_TEST || env.DATABASE_URL_TEST || env.DATABASE_URL
+  : env.DATABASE_URL;
 
 // Configure connection pool parameters based on environment
-const databaseUrl = baseDatabaseUrl ? configureDatabaseUrl(baseDatabaseUrl, isTest) : baseDatabaseUrl;
+const databaseUrl = baseDatabaseUrl
+  ? configureDatabaseUrl(baseDatabaseUrl, isTest)
+  : baseDatabaseUrl;
 
 export const prisma =
   globalForPrisma.prisma ||
