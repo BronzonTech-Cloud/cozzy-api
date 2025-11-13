@@ -76,6 +76,8 @@ describe('Profile', () => {
 
     it('should return 409 if email is already in use', async () => {
       await createTestUser('existing@example.com', 'USER');
+      // Small delay to ensure user is visible for duplicate email check
+      await new Promise((resolve) => setTimeout(resolve, 500));
 
       const res = await request(app)
         .patch('/api/v1/profile')

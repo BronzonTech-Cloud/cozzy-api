@@ -33,7 +33,7 @@ export async function createTestUserAndLogin(
   // The login endpoint queries by email and requires password hash, so we must ensure both are visible
   // This prevents "User exists: false" and "Invalid credentials" errors in CI
   const visibilityStartTime = Date.now();
-  const visibilityTimeoutMs = 15000; // 15 seconds max wait (increased for CI)
+  const visibilityTimeoutMs = VERIFICATION_TIMEOUT_MS; // Use same timeout as other verifications (90000ms in CI)
   let userVisibleByEmail = false;
   let userHasPasswordHash = false;
   const maxVisibilityAttempts = 30; // Increased attempts for CI reliability
@@ -48,8 +48,8 @@ export async function createTestUserAndLogin(
     }
 
     if (attempt > 0) {
-      // Exponential backoff: 100ms, 200ms, 300ms, etc.
-      await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+      // Exponential backoff: 200ms, 400ms, 600ms, etc. (increased for CI)
+      await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
     }
 
     // Force connection refresh before each check
@@ -230,8 +230,8 @@ export async function createTestUserAndLogin(
       throw new Error(`Login timeout after ${loginTimeoutMs}ms for ${email}`);
     }
     if (attempt > 0) {
-      // Exponential backoff: 100ms, 200ms, 300ms, 400ms, 500ms, etc.
-      await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+      // Exponential backoff: 200ms, 400ms, 600ms, 800ms, 1000ms, etc. (increased for CI)
+      await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
     }
 
     loginRes = await request(app).post('/api/v1/auth/login').send({
@@ -290,8 +290,8 @@ export async function createTestUserAndLogin(
     }
 
     if (attempt > 0) {
-      // Exponential backoff: 100ms, 200ms, 300ms, etc.
-      await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+      // Exponential backoff: 200ms, 400ms, 600ms, etc. (increased for CI)
+      await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
     }
 
     // Force connection refresh before each check
@@ -361,8 +361,8 @@ export async function createTestUserAndLogin(
 
   // CRITICAL: Throw error if user is not visible - this function must guarantee visibility
   if (!finalUserCheck) {
-    // One final attempt with delay
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    // One final attempt with delay - increased for CI
+    await new Promise((resolve) => setTimeout(resolve, 1000));
     await prisma.$executeRaw`SELECT 1`;
 
     let visibleByIdRaw = false;
@@ -475,14 +475,29 @@ export async function createTestUser(email: string, role: 'USER' | 'ADMIN' = 'US
           if (!updatedUser.passwordHash) {
             throw new Error(`Password hash not set for user ${email} (ID: ${upsertedUser.id})`);
           }
+          // Verify user is visible by email within transaction
+          const verifyInTx = await tx.user.findUnique({
+            where: { email },
+          });
+          if (!verifyInTx || verifyInTx.id !== updatedUser.id || !verifyInTx.passwordHash) {
+            throw new Error(`User ${email} not fully visible within transaction after update`);
+          }
           return updatedUser;
+        }
+
+        // CRITICAL: Verify user is visible by email within transaction (same query as login)
+        const verifyInTx = await tx.user.findUnique({
+          where: { email },
+        });
+        if (!verifyInTx || verifyInTx.id !== upsertedUser.id || !verifyInTx.passwordHash) {
+          throw new Error(`User ${email} not fully visible within transaction after upsert`);
         }
 
         return upsertedUser;
       },
       {
         isolationLevel: 'ReadCommitted',
-        timeout: 10000, // 10 second timeout
+        timeout: 20000, // 20 second timeout (increased for CI with verification logic)
       },
     );
 
@@ -491,21 +506,25 @@ export async function createTestUser(email: string, role: 'USER' | 'ADMIN' = 'US
       user.passwordHash = passwordHash;
     }
 
+    // CRITICAL: Force transaction commit and wait for it to be visible
+    // Execute a simple query to ensure the transaction connection is released
+    await prisma.$executeRaw`SELECT 1`;
+    
     // Delay to ensure commit is visible - transaction commits, but connection pool may cache
     // Increased delay for CI environments where connection pool visibility can be slower
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise((resolve) => setTimeout(resolve, 1000));
 
     // CRITICAL: Verify user is visible by email (same query as login endpoint)
     // This ensures the user can be found when login attempts to query by email
     // Use transaction with ReadCommitted isolation to ensure we see committed data
     let verifyUser: { id: string; email: string; passwordHash: string } | null = null;
     let verifyUserByEmail: { id: string; email: string; passwordHash: string } | null = null;
-    const quickVerificationAttempts = 10; // Reduced to prevent timeouts
+    const quickVerificationAttempts = 20; // Increased for CI reliability
 
     for (let attempt = 0; attempt < quickVerificationAttempts; attempt++) {
       if (attempt > 0) {
-        // Exponential backoff - reduced delays to prevent timeouts
-        await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+        // Exponential backoff - increased delays for CI reliability
+        await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
       }
 
       // Force connection refresh before each verification attempt
@@ -764,23 +783,34 @@ export async function createTestCategory(name: string, slug?: string) {
           throw new Error(`Failed to create/update category with slug ${categorySlug}`);
         }
 
+        // CRITICAL: Verify category is visible within transaction
+        const verifyInTx = await tx.category.findUnique({
+          where: { id: upsertedCategory.id },
+        });
+        if (!verifyInTx || verifyInTx.id !== upsertedCategory.id) {
+          throw new Error(`Category ${name} not visible within transaction after upsert`);
+        }
+
         return upsertedCategory;
       },
       {
         isolationLevel: 'ReadCommitted',
-        timeout: 10000, // 10 second timeout
+        timeout: 20000, // 20 second timeout (increased for CI with verification logic)
       },
     );
 
+    // CRITICAL: Force transaction commit and wait for it to be visible
+    await prisma.$executeRaw`SELECT 1`;
+    
     // Delay to ensure commit is visible
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise((resolve) => setTimeout(resolve, 1000));
 
     // CRITICAL: Verify category is visible - this function must guarantee visibility
     // This prevents FK violations when creating products that reference this category
     // Use transaction with ReadCommitted isolation to ensure we see committed data
     const verificationStartTime = Date.now();
     const verificationTimeoutMs = 15000; // 15 seconds for verification (increased for CI)
-    const verificationMaxAttempts = 15; // Reduced to prevent timeouts
+    const verificationMaxAttempts = 25; // Increased for CI reliability
     let verifyCategory: { id: string; name: string; slug: string } | null = null;
 
     for (let attempt = 0; attempt < verificationMaxAttempts; attempt++) {
@@ -790,8 +820,8 @@ export async function createTestCategory(name: string, slug?: string) {
       }
 
       if (attempt > 0) {
-        // Exponential backoff - reduced delays to prevent timeouts
-        await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+        // Exponential backoff - increased delays for CI reliability
+        await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
       }
 
       // Force connection refresh before each check
@@ -815,9 +845,7 @@ export async function createTestCategory(name: string, slug?: string) {
         }
 
         // Strategy 2: Try raw SQL query (bypasses some caching)
-        const idResult = await prisma.$queryRaw<
-          Array<{ id: string; name: string; slug: string }>
-        >`
+        const idResult = await prisma.$queryRaw<Array<{ id: string; name: string; slug: string }>>`
           SELECT id, name, slug FROM "Category" WHERE id = ${category.id} LIMIT 1
         `;
 
@@ -1009,11 +1037,19 @@ export async function createTestProduct(
         throw new Error(`Failed to create product with slug ${uniqueSlug}`);
       }
 
+      // CRITICAL: Verify product is visible within transaction
+      const verifyInTx = await tx.product.findUnique({
+        where: { id: createdProduct.id },
+      });
+      if (!verifyInTx || verifyInTx.id !== createdProduct.id) {
+        throw new Error(`Product ${createdProduct.title} not visible within transaction after create`);
+      }
+
       return createdProduct;
     },
     {
       isolationLevel: 'ReadCommitted',
-      timeout: 10000, // 10 second timeout
+      timeout: 20000, // 20 second timeout (increased for CI with verification logic)
     },
   );
 
@@ -1028,7 +1064,7 @@ export async function createTestProduct(
   // Use multiple verification strategies: raw SQL, Prisma findUnique, and findFirst
   const productVerificationStartTime = Date.now();
   const productVerificationTimeoutMs = 15000; // 15 seconds for verification (increased for CI)
-  const productVerificationMaxAttempts = 15; // Reduced to prevent timeouts
+    const productVerificationMaxAttempts = 25; // Increased for CI reliability
   let verifyProduct: { id: string; title: string; slug: string } | null = null;
 
   for (let attempt = 0; attempt < productVerificationMaxAttempts; attempt++) {
@@ -1038,8 +1074,8 @@ export async function createTestProduct(
     }
 
     if (attempt > 0) {
-      // Exponential backoff: 100ms, 200ms, 300ms, etc.
-      await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+      // Exponential backoff: 200ms, 400ms, 600ms, etc. (increased for CI)
+      await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
     }
 
     // Force connection refresh before each check
@@ -1098,8 +1134,8 @@ export async function createTestProduct(
 
   // CRITICAL: Throw error if product is not visible - this function must guarantee visibility
   if (!verifyProduct) {
-    // One final attempt with delay
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    // One final attempt with delay - increased for CI
+    await new Promise((resolve) => setTimeout(resolve, 1000));
     await prisma.$executeRaw`SELECT 1`;
 
     try {

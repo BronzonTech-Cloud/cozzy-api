@@ -35,4 +35,3 @@ export default defineConfig({
     teardownTimeout: 10000, // 10 seconds for teardown
   },
 });
-

@@ -9,12 +9,14 @@ This is the **initial release** of Cozzy E-commerce REST API, featuring a comple
 ## ✨ Key Features
 
 ### 🔐 Authentication & Authorization
+
 - JWT-based authentication with access and refresh tokens
 - Role-based access control (Admin and User roles)
 - Secure password hashing with bcrypt
 - Token refresh mechanism
 
 ### 📦 Product Management
+
 - Full CRUD operations for products
 - Advanced filtering, pagination, and search
 - Category management
@@ -22,18 +24,21 @@ This is the **initial release** of Cozzy E-commerce REST API, featuring a comple
 - Product images support
 
 ### 🛒 Order Management
+
 - Order creation with inventory validation
 - Real-time stock management
 - Order status tracking
 - User and admin order views
 
 ### 💳 Payment Integration
+
 - Stripe Checkout integration
 - Webhook support for payment confirmation
 - Secure payment processing
 - Order status updates via webhooks
 
 ### 🔒 Security Features
+
 - Rate limiting to prevent brute force attacks
 - Input validation with Zod schemas
 - CORS configuration
@@ -41,6 +46,7 @@ This is the **initial release** of Cozzy E-commerce REST API, featuring a comple
 - SQL injection protection via Prisma ORM
 
 ### 🧪 Quality Assurance
+
 - Comprehensive test suite (237+ tests)
 - 69%+ code coverage
 - CI/CD pipeline with GitHub Actions
@@ -105,6 +111,7 @@ npm run dev
 ## 🎯 What's Included
 
 ### API Endpoints
+
 - ✅ Authentication (register, login, refresh, me)
 - ✅ User management (admin only)
 - ✅ Category CRUD operations
@@ -113,6 +120,7 @@ npm run dev
 - ✅ Stripe payment integration
 
 ### Developer Experience
+
 - ✅ TypeScript for type safety
 - ✅ Comprehensive error handling
 - ✅ Request validation
@@ -123,6 +131,7 @@ npm run dev
 ## 🔐 Security
 
 This release includes multiple security features:
+
 - Password hashing with bcrypt
 - JWT token-based authentication
 - Rate limiting
@@ -145,4 +154,3 @@ This project is licensed under the MIT License - see the [LICENSE](https://githu
 ---
 
 **Full Changelog:** https://github.com/BronzonTech-Cloud/cozzy-api/compare/initial-commit...v1.0.0
-

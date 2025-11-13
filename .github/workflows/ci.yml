@@ -73,11 +73,11 @@ jobs:
           # Create database if it doesn't exist
           # Note: Using 'postgres' password from service definition (CI test DB only, not production)
           PGPASSWORD="$POSTGRES_PASSWORD" psql -h localhost -U postgres -tc "SELECT 1 FROM pg_database WHERE datname = 'cozzy_test_db'" | grep -q 1 || PGPASSWORD="$POSTGRES_PASSWORD" psql -h localhost -U postgres -c "CREATE DATABASE cozzy_test_db"
-          
+
           # Apply schema using db push (faster for CI, no migration history needed)
           # This ensures the schema matches prisma/schema.prisma exactly
           bunx prisma db push --accept-data-loss --skip-generate
-          
+
           # Verify schema was applied
           echo "✅ Database schema applied successfully"
 
