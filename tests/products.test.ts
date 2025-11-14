@@ -1,7 +1,12 @@
 import request from 'supertest';
 
 import { createApp } from '../src/app';
-import { createTestUser, createTestCategory, createTestProduct, cleanupDatabase } from './helpers';
+import {
+  createTestUserAndLogin,
+  createTestCategory,
+  createTestProduct,
+  cleanupDatabase,
+} from './helpers';
 
 const app = createApp();
 
@@ -11,19 +16,19 @@ describe('Products', () => {
 
   beforeEach(async () => {
     await cleanupDatabase();
-    await createTestUser('admin@example.com', 'ADMIN');
 
-    const loginRes = await request(app).post('/api/v1/auth/login').send({
-      email: 'admin@example.com',
-      password: 'password123',
-    });
+    // Create admin user and get token using helper
+    const adminResult = await createTestUserAndLogin(app, 'admin@example.com', 'ADMIN');
+    adminToken = adminResult.token;
 
-    expect(loginRes.status).toBe(200);
-    expect(loginRes.body).toHaveProperty('accessToken');
-    adminToken = loginRes.body.accessToken;
+    // Small delay to ensure user is fully visible before creating category
+    await new Promise((resolve) => setTimeout(resolve, 100));
 
     const category = await createTestCategory('Electronics');
     categoryId = category.id;
+
+    // Small delay to ensure category is fully visible before creating products
+    await new Promise((resolve) => setTimeout(resolve, 100));
   });
 
   describe('GET /api/v1/products', () => {
@@ -62,9 +67,9 @@ describe('Products', () => {
 
   describe('GET /api/v1/products/:slug', () => {
     it('should get product by slug', async () => {
-      await createTestProduct(categoryId, { title: 'Test Product' });
+      const product = await createTestProduct(categoryId, { title: 'Test Product' });
 
-      const res = await request(app).get('/api/v1/products/test-product');
+      const res = await request(app).get(`/api/v1/products/${product.slug}`);
 
       expect(res.status).toBe(200);
       expect(res.body.product.title).toBe('Test Product');

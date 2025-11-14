@@ -26,23 +26,23 @@ enum DiscountType {
 }
 
 model User {
-  id                        String    @id @default(uuid())
-  email                     String    @unique
-  passwordHash              String
-  name                      String
-  role                      Role      @default(USER)
-  emailVerified             Boolean   @default(false)
-  verificationToken         String?
-  verificationTokenExpires  DateTime?
-  resetPasswordToken        String?
-  resetPasswordExpires      DateTime?
-  orders                    Order[]
-  cart                      Cart?
-  reviews                   Review[]
-  wishlist                  Wishlist[]
-  addresses                 Address[]
-  createdAt                 DateTime  @default(now())
-  updatedAt                 DateTime  @updatedAt
+  id                       String     @id @default(uuid())
+  email                    String     @unique
+  passwordHash             String
+  name                     String
+  role                     Role       @default(USER)
+  emailVerified            Boolean    @default(false)
+  verificationToken        String?
+  verificationTokenExpires DateTime?
+  resetPasswordToken       String?
+  resetPasswordExpires     DateTime?
+  orders                   Order[]
+  cart                     Cart?
+  reviews                  Review[]
+  wishlist                 Wishlist[]
+  addresses                Address[]
+  createdAt                DateTime   @default(now())
+  updatedAt                DateTime   @updatedAt
 }
 
 model Category {
@@ -55,62 +55,69 @@ model Category {
 }
 
 model Product {
-  id           String          @id @default(uuid())
-  title        String
-  slug         String          @unique
-  description  String
-  priceCents   Int
-  currency     String          @default("USD")
-  sku          String?
-  images       String[]
-  active       Boolean         @default(true)
-  stock        Int             @default(0)
-  categoryId   String
-  category     Category        @relation(fields: [categoryId], references: [id])
-  orderItems   OrderItem[]
-  cartItems    CartItem[]
-  reviews      Review[]
-  wishlist     Wishlist[]
-  variants     ProductVariant[]
-  createdAt    DateTime        @default(now())
-  updatedAt    DateTime        @updatedAt
+  id          String           @id @default(uuid())
+  title       String
+  slug        String           @unique
+  description String
+  priceCents  Int
+  currency    String           @default("USD")
+  sku         String?
+  images      String[]
+  active      Boolean          @default(true)
+  stock       Int              @default(0)
+  categoryId  String
+  category    Category         @relation(fields: [categoryId], references: [id])
+  orderItems  OrderItem[]
+  cartItems   CartItem[]
+  reviews     Review[]
+  wishlist    Wishlist[]
+  variants    ProductVariant[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
 
   @@index([categoryId])
+  @@index([active])
+  @@index([priceCents])
+  @@index([stock])
+  @@index([createdAt])
+  @@index([title, description])
 }
 
 model Order {
-  id                String              @id @default(uuid())
-  userId            String
-  user              User                @relation(fields: [userId], references: [id])
-  status            OrderStatus         @default(PENDING)
-  totalCents        Int
-  currency          String              @default("USD")
-  itemsCount        Int
-  paymentProvider   String              @default("STRIPE")
-  paymentIntentId   String?
-  couponCode        String?
-  discountCents     Int                 @default(0)
-  trackingNumber    String?
-  shippedAt         DateTime?
-  deliveredAt       DateTime?
-  items             OrderItem[]
-  statusHistory     OrderStatusHistory[]
-  createdAt         DateTime            @default(now())
-  updatedAt         DateTime            @updatedAt
+  id              String               @id @default(uuid())
+  userId          String
+  user            User                 @relation(fields: [userId], references: [id])
+  status          OrderStatus          @default(PENDING)
+  totalCents      Int
+  currency        String               @default("USD")
+  itemsCount      Int
+  paymentProvider String               @default("STRIPE")
+  paymentIntentId String?
+  couponId        String?
+  coupon          Coupon?              @relation(fields: [couponId], references: [id])
+  discountCents   Int                  @default(0)
+  trackingNumber  String?
+  shippedAt       DateTime?
+  deliveredAt     DateTime?
+  items           OrderItem[]
+  statusHistory   OrderStatusHistory[]
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
 
   @@index([userId])
   @@index([status])
+  @@index([couponId])
 }
 
 model OrderItem {
-  id              String  @id @default(uuid())
-  orderId         String
-  order           Order   @relation(fields: [orderId], references: [id])
-  productId       String
-  product         Product @relation(fields: [productId], references: [id])
-  quantity        Int
-  unitPriceCents  Int
-  subtotalCents   Int
+  id             String  @id @default(uuid())
+  orderId        String
+  order          Order   @relation(fields: [orderId], references: [id])
+  productId      String
+  product        Product @relation(fields: [productId], references: [id])
+  quantity       Int
+  unitPriceCents Int
+  subtotalCents  Int
 }
 
 model Cart {
@@ -145,7 +152,7 @@ model Review {
   product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
   userId    String
   user      User     @relation(fields: [userId], references: [id])
-  rating    Int      // 1-5 stars
+  rating    Int // 1-5 stars
   title     String?
   comment   String?
   verified  Boolean  @default(false) // Verified purchase
@@ -172,21 +179,21 @@ model Wishlist {
 }
 
 model Address {
-  id          String   @id @default(uuid())
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  label       String   // "Home", "Work", etc.
-  firstName   String
-  lastName    String
-  street      String
-  city        String
-  state       String?
-  zipCode     String
-  country     String   @default("US")
-  phone       String?
-  isDefault   Boolean  @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  label     String // "Home", "Work", etc.
+  firstName String
+  lastName  String
+  street    String
+  city      String
+  state     String?
+  zipCode   String
+  country   String   @default("US")
+  phone     String?
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([userId])
 }
@@ -203,16 +210,16 @@ model OrderStatusHistory {
 }
 
 model ProductVariant {
-  id          String   @id @default(uuid())
-  productId   String
-  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
-  name        String   // "Size: Large", "Color: Red"
-  sku         String?  @unique
-  priceCents  Int?     // Override product price
-  stock       Int      @default(0)
-  images      String[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id         String   @id @default(uuid())
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  name       String // "Size: Large", "Color: Red"
+  sku        String?  @unique
+  priceCents Int? // Override product price
+  stock      Int      @default(0)
+  images     String[]
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   @@index([productId])
 }
@@ -222,14 +229,15 @@ model Coupon {
   code          String       @unique
   description   String?
   discountType  DiscountType
-  discountValue Int          // Percentage or cents
-  minPurchase   Int?         // Minimum purchase in cents
-  maxDiscount   Int?         // Maximum discount in cents
-  usageLimit    Int?         // Total usage limit
+  discountValue Int // Percentage or cents
+  minPurchase   Int? // Minimum purchase in cents
+  maxDiscount   Int? // Maximum discount in cents
+  usageLimit    Int? // Total usage limit
   usageCount    Int          @default(0)
   validFrom     DateTime
   validUntil    DateTime
   active        Boolean      @default(true)
+  orders        Order[]
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 

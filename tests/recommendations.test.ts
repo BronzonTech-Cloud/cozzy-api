@@ -2,7 +2,12 @@ import request from 'supertest';
 
 import { createApp } from '../src/app';
 import { prisma } from '../src/config/prisma';
-import { createTestUser, createTestCategory, createTestProduct, cleanupDatabase } from './helpers';
+import {
+  createTestUserAndLogin,
+  createTestCategory,
+  createTestProduct,
+  cleanupDatabase,
+} from './helpers';
 
 const app = createApp();
 
@@ -14,13 +19,10 @@ describe('Product Recommendations', () => {
 
   beforeEach(async () => {
     await cleanupDatabase();
-    await createTestUser('user@example.com', 'USER');
 
-    const loginRes = await request(app).post('/api/v1/auth/login').send({
-      email: 'user@example.com',
-      password: 'password123',
-    });
-    userToken = loginRes.body.accessToken;
+    // Create user and get token using helper
+    const userResult = await createTestUserAndLogin(app, 'user@example.com', 'USER');
+    userToken = userResult.token;
 
     const category1 = await createTestCategory('Electronics');
     category1Id = category1.id;
@@ -51,9 +53,15 @@ describe('Product Recommendations', () => {
   describe('GET /api/v1/products/recommendations', () => {
     it('should get personalized recommendations based on purchase history', async () => {
       // Create an order with product from category1
+      // Ensure user exists before creating order to avoid foreign key violations
+      const user = await prisma.user.findUnique({ where: { email: 'user@example.com' } });
+      if (!user) {
+        throw new Error('Test user not found. Ensure beforeEach creates the user.');
+      }
+
       const order = await prisma.order.create({
         data: {
-          userId: (await prisma.user.findUnique({ where: { email: 'user@example.com' } }))!.id,
+          userId: user.id,
           status: 'PAID',
           totalCents: 100000,
           currency: 'USD',

@@ -7,9 +7,9 @@ const options: swaggerJsdoc.Options = {
     openapi: '3.0.0',
     info: {
       title: 'Cozzy E-commerce REST API',
-      version: '1.0.0',
+      version: '1.1.0',
       description:
-        'A production-ready, full-featured RESTful E-commerce API built with TypeScript, Express, PostgreSQL, and Stripe integration.',
+        'A production-ready, full-featured RESTful E-commerce API built with TypeScript, Express, PostgreSQL, and Stripe integration.\n\n**Performance Features:**\n- Response caching for frequently accessed endpoints\n- Database query optimization with indexes\n- Rate limiting per endpoint\n- Performance monitoring and logging',
       contact: {
         name: 'API Support',
         url: 'https://github.com/BronzonTech-Cloud/cozzy-api',
@@ -198,6 +198,22 @@ const options: swaggerJsdoc.Options = {
             paymentIntentId: {
               type: 'string',
               nullable: true,
+            },
+            couponId: {
+              type: 'string',
+              format: 'uuid',
+              nullable: true,
+              description: 'Applied coupon ID',
+            },
+            coupon: {
+              $ref: '#/components/schemas/Coupon',
+              nullable: true,
+              description: 'Applied coupon details',
+            },
+            discountCents: {
+              type: 'integer',
+              default: 0,
+              description: 'Discount amount in cents',
             },
             items: {
               type: 'array',
@@ -582,7 +598,7 @@ const options: swaggerJsdoc.Options = {
             },
             images: {
               type: 'array',
-              items: { type: 'string', format: 'url' },
+              items: { type: 'string', format: 'uri' },
               description: 'Variant-specific images',
             },
             createdAt: {
@@ -620,7 +636,7 @@ const options: swaggerJsdoc.Options = {
             },
             images: {
               type: 'array',
-              items: { type: 'string', format: 'url' },
+              items: { type: 'string', format: 'uri' },
               default: [],
             },
           },

@@ -1,8 +1,14 @@
+import type { Request, Response } from 'express';
 import request from 'supertest';
 import { vi } from 'vitest';
 
 import { createApp } from '../src/app';
-import { createTestUser, createTestCategory, createTestProduct, cleanupDatabase } from './helpers';
+import {
+  createTestUserAndLogin,
+  createTestCategory,
+  createTestProduct,
+  cleanupDatabase,
+} from './helpers';
 
 vi.mock('../src/config/stripe', () => {
   const mockCreate = vi.fn().mockResolvedValue({ url: 'https://mock.checkout/session' });
@@ -52,16 +58,10 @@ describe('Payments', () => {
 
   beforeEach(async () => {
     await cleanupDatabase();
-    await createTestUser('user@example.com', 'USER');
 
-    const loginRes = await request(app).post('/api/v1/auth/login').send({
-      email: 'user@example.com',
-      password: 'password123',
-    });
-
-    expect(loginRes.status).toBe(200);
-    expect(loginRes.body).toHaveProperty('accessToken');
-    userToken = loginRes.body.accessToken;
+    // Create user and get token using helper
+    const userResult = await createTestUserAndLogin(app, 'user@example.com', 'USER');
+    userToken = userResult.token;
 
     const category = await createTestCategory('Electronics');
     categoryId = category.id;
@@ -78,6 +78,7 @@ describe('Payments', () => {
 
     expect(orderRes.status).toBe(201);
     expect(orderRes.body).toHaveProperty('order');
+    expect(orderRes.body.order).not.toBeNull();
     expect(orderRes.body.order).toHaveProperty('id');
     orderId = orderRes.body.order.id;
   });
@@ -103,15 +104,12 @@ describe('Payments', () => {
     });
 
     it('should reject checkout for order not owned by user', async () => {
-      await createTestUser('other@example.com', 'USER');
-      const otherLogin = await request(app).post('/api/v1/auth/login').send({
-        email: 'other@example.com',
-        password: 'password123',
-      });
+      const otherResult = await createTestUserAndLogin(app, 'other@example.com', 'USER');
+      const otherToken = otherResult.token;
 
       const res = await request(app)
         .post('/api/v1/payments/checkout')
-        .set('Authorization', `Bearer ${otherLogin.body.accessToken}`)
+        .set('Authorization', `Bearer ${otherToken}`)
         .send({ orderId });
 
       expect(res.status).toBe(403);
@@ -144,6 +142,161 @@ describe('Payments', () => {
 
       expect(res.status).toBe(200);
       expect(res.body).toHaveProperty('received', true);
+    });
+
+    it('should handle webhook with no orderId in metadata', async () => {
+      const mockEvent = {
+        type: 'checkout.session.completed',
+        data: {
+          object: {
+            metadata: {},
+            payment_intent: 'pi_test_123',
+          },
+        },
+      };
+
+      const res = await request(app)
+        .post('/api/v1/payments/stripe/webhook')
+        .set('stripe-signature', 'test-signature')
+        .send(mockEvent);
+
+      expect(res.status).toBe(200);
+    });
+
+    it('should handle payment_intent.payment_failed event', async () => {
+      // Create an order with a payment intent ID
+      await request(app)
+        .post('/api/v1/payments/checkout')
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({ orderId });
+
+      const mockEvent = {
+        type: 'payment_intent.payment_failed',
+        data: {
+          object: {
+            id: 'pi_test_123',
+          },
+        },
+      };
+
+      const res = await request(app)
+        .post('/api/v1/payments/stripe/webhook')
+        .set('stripe-signature', 'test-signature')
+        .send(mockEvent);
+
+      expect(res.status).toBe(200);
+    });
+
+    it('should handle unknown event types', async () => {
+      const mockEvent = {
+        type: 'unknown.event.type',
+        data: {
+          object: {},
+        },
+      };
+
+      const res = await request(app)
+        .post('/api/v1/payments/stripe/webhook')
+        .set('stripe-signature', 'test-signature')
+        .send(mockEvent);
+
+      expect(res.status).toBe(200);
+    });
+
+    it('should return 400 for missing signature', async () => {
+      const mockEvent = {
+        type: 'checkout.session.completed',
+        data: {
+          object: {
+            metadata: { orderId },
+            payment_intent: 'pi_test_123',
+          },
+        },
+      };
+
+      const res = await request(app).post('/api/v1/payments/stripe/webhook').send(mockEvent);
+
+      expect(res.status).toBe(400);
+      expect(res.text).toContain('Missing signature');
+    });
+
+    it('should return 400 for webhook signature verification error', async () => {
+      const { stripe } = await import('../src/config/stripe');
+      if (!stripe) {
+        throw new Error('Stripe mock not configured');
+      }
+      vi.mocked(stripe.webhooks.constructEvent).mockImplementationOnce(() => {
+        throw new Error('Invalid signature');
+      });
+
+      const mockEvent = {
+        type: 'checkout.session.completed',
+        data: {
+          object: {
+            metadata: { orderId },
+            payment_intent: 'pi_test_123',
+          },
+        },
+      };
+
+      const res = await request(app)
+        .post('/api/v1/payments/stripe/webhook')
+        .set('stripe-signature', 'invalid-signature')
+        .send(mockEvent);
+
+      expect(res.status).toBe(400);
+      expect(res.text).toContain('Webhook Error');
+    });
+
+    it('should return 500 when Stripe webhook secret is not configured', async () => {
+      // Mock stripe as null and env without STRIPE_WEBHOOK_SECRET
+      vi.doMock('../src/config/stripe', () => ({
+        stripe: null,
+      }));
+
+      vi.doMock('../src/config/env', async () => {
+        const actual = (await vi.importActual('../src/config/env')) as {
+          env: Record<string, unknown>;
+        };
+        return {
+          ...actual,
+          env: {
+            ...actual.env,
+            STRIPE_WEBHOOK_SECRET: undefined,
+          },
+        };
+      });
+
+      // Clear the module cache and re-import
+      vi.resetModules();
+      const paymentsModule = await import('../src/modules/payments/payments.controller');
+      const { stripeWebhook } = paymentsModule;
+
+      // Create a mock request/response
+      const mockReq = {
+        headers: { 'stripe-signature': 'test-signature' },
+        body: {
+          type: 'checkout.session.completed',
+          data: {
+            object: {
+              metadata: { orderId },
+              payment_intent: 'pi_test_123',
+            },
+          },
+        },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any as Request;
+
+      const mockRes = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn().mockReturnThis(),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any as Response;
+
+      await stripeWebhook(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(500);
+      expect(mockRes.json).toHaveBeenCalledWith({ message: 'Stripe webhook not configured' });
     });
   });
 });

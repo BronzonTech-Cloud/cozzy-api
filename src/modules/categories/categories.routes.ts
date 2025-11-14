@@ -2,6 +2,7 @@ import { Router } from 'express';
 
 import { authGuard, requireRole } from '../../middleware/auth';
 import { validate } from '../../middleware/validate';
+import { cacheMiddleware } from '../../middleware/cache';
 import { createCategorySchema, updateCategorySchema } from './categories.schema';
 import {
   createCategory,
@@ -32,7 +33,7 @@ export const categoriesRouter = Router();
  *                   items:
  *                     $ref: '#/components/schemas/Category'
  */
-categoriesRouter.get('/', listCategories);
+categoriesRouter.get('/', cacheMiddleware({ ttl: 600, keyPrefix: 'categories' }), listCategories);
 
 /**
  * @swagger
@@ -60,7 +61,11 @@ categoriesRouter.get('/', listCategories);
  *       404:
  *         $ref: '#/components/responses/NotFound'
  */
-categoriesRouter.get('/:slug', getCategoryBySlug);
+categoriesRouter.get(
+  '/:slug',
+  cacheMiddleware({ ttl: 600, keyPrefix: 'category' }),
+  getCategoryBySlug,
+);
 
 /**
  * @swagger

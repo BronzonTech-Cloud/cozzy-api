@@ -27,71 +27,188 @@ export async function updateProfile(req: Request, res: Response) {
   const userId = req.user!.id;
   const { name, email } = req.body as { name?: string; email?: string };
 
-  // Check if email is being changed and if it's already in use
-  if (email) {
-    const existingUser = await prisma.user.findUnique({ where: { email } });
-    if (existingUser && existingUser.id !== userId) {
-      return res.status(409).json({ message: 'Email already in use' });
-    }
-    // If email is changed, reset verification status
-    const updateData: { name?: string; email?: string; emailVerified?: boolean } = {
-      email,
-      emailVerified: false,
-    };
-    if (name) updateData.name = name;
-    const user = await prisma.user.update({
-      where: { id: userId },
-      data: updateData,
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        role: true,
-        emailVerified: true,
-        updatedAt: true,
-      },
-    });
-    return res.json({ user });
+  // Input validation: ensure at least one field is provided
+  if (!name && !email) {
+    return res.status(400).json({ message: 'At least one field (name or email) must be provided' });
   }
 
-  // Only name is being updated
-  const user = await prisma.user.update({
-    where: { id: userId },
-    data: { name },
-    select: {
-      id: true,
-      email: true,
-      name: true,
-      role: true,
-      emailVerified: true,
-      updatedAt: true,
-    },
-  });
-  return res.json({ user });
+  // Validate and normalize name if provided
+  let validatedName: string | undefined;
+  if (name !== undefined) {
+    const trimmedName = name.trim();
+    if (trimmedName.length === 0) {
+      return res.status(400).json({ message: 'Name cannot be empty' });
+    }
+    if (trimmedName.length > 100) {
+      return res.status(400).json({ message: 'Name must be 100 characters or less' });
+    }
+    validatedName = trimmedName;
+  }
+
+  // Validate email format if provided
+  let validatedEmail: string | undefined;
+  if (email !== undefined) {
+    const trimmedEmail = email.trim().toLowerCase();
+    if (trimmedEmail.length === 0) {
+      return res.status(400).json({ message: 'Email cannot be empty' });
+    }
+    // Simple RFC-lite email validation regex - limit input length to prevent ReDoS
+    if (trimmedEmail.length > 254) {
+      return res.status(400).json({ message: 'Invalid email format' });
+    }
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailPattern.test(trimmedEmail)) {
+      return res.status(400).json({ message: 'Invalid email format' });
+    }
+    validatedEmail = trimmedEmail;
+  }
+
+  // Use a transaction to atomically fetch and update to prevent TOCTOU race condition
+  try {
+    const user = await prisma.$transaction(async (tx) => {
+      // Fetch current user within transaction for atomic comparison
+      const currentUser = await tx.user.findUnique({
+        where: { id: userId },
+        select: { email: true, name: true },
+      });
+      if (!currentUser) {
+        throw new Error('NOT_FOUND');
+      }
+
+      // Build update data with validated values (never write undefined)
+      const updateData: { name?: string; email?: string; emailVerified?: boolean } = {};
+
+      // Add validated name if provided
+      if (validatedName !== undefined) {
+        updateData.name = validatedName;
+      }
+
+      // Handle email update - only reset verification if email is actually changing
+      if (validatedEmail !== undefined) {
+        // Only update email if it's actually changing (atomic comparison within transaction)
+        if (validatedEmail !== currentUser.email) {
+          updateData.email = validatedEmail;
+          updateData.emailVerified = false;
+        }
+        // If email is the same, don't include it in updateData to avoid unnecessary update
+      }
+
+      // Check if updateData is empty before calling Prisma
+      if (Object.keys(updateData).length === 0) {
+        // No changes to make, return current user data
+        return await tx.user.findUnique({
+          where: { id: userId },
+          select: {
+            id: true,
+            email: true,
+            name: true,
+            role: true,
+            emailVerified: true,
+            updatedAt: true,
+          },
+        });
+      }
+
+      // Perform the update within the same transaction
+      return await tx.user.update({
+        where: { id: userId },
+        data: updateData,
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          role: true,
+          emailVerified: true,
+          updatedAt: true,
+        },
+      });
+    });
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    return res.json({ user });
+  } catch (error: unknown) {
+    // Handle NOT_FOUND error from transaction
+    if (error instanceof Error && error.message === 'NOT_FOUND') {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    // Handle Prisma unique constraint violation (P2002)
+    if (
+      error &&
+      typeof error === 'object' &&
+      'code' in error &&
+      error.code === 'P2002' &&
+      'meta' in error &&
+      error.meta &&
+      typeof error.meta === 'object' &&
+      'target' in error.meta &&
+      Array.isArray(error.meta.target) &&
+      error.meta.target.includes('email')
+    ) {
+      return res.status(409).json({ message: 'Email already in use' });
+    }
+    // Re-throw other errors
+    throw error;
+  }
 }
 
 export async function changePassword(req: Request, res: Response) {
-  const userId = req.user!.id;
-  const { currentPassword, newPassword } = req.body as {
-    currentPassword: string;
-    newPassword: string;
-  };
+  try {
+    const userId = req.user!.id;
+    const { currentPassword, newPassword } = req.body as {
+      currentPassword?: string;
+      newPassword?: string;
+    };
 
-  const user = await prisma.user.findUnique({ where: { id: userId } });
-  if (!user) {
-    return res.status(404).json({ message: 'User not found' });
+    // Input validation: ensure both fields are present
+    if (
+      !currentPassword ||
+      typeof currentPassword !== 'string' ||
+      currentPassword.trim().length === 0
+    ) {
+      return res.status(400).json({ message: 'Current password is required' });
+    }
+
+    if (!newPassword || typeof newPassword !== 'string' || newPassword.trim().length === 0) {
+      return res.status(400).json({ message: 'New password is required' });
+    }
+
+    // Enforce minimum password strength
+    if (newPassword.length < 8) {
+      return res.status(400).json({ message: 'New password must be at least 8 characters long' });
+    }
+
+    // Ensure new password differs from current password
+    if (currentPassword === newPassword) {
+      return res
+        .status(400)
+        .json({ message: 'New password must be different from current password' });
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const isValid = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!isValid) {
+      return res.status(401).json({ message: 'Current password is incorrect' });
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    await prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash },
+    });
+
+    return res.json({ message: 'Password changed successfully' });
+  } catch (error) {
+    console.error(
+      'Error in changePassword:',
+      error instanceof Error ? error.message : 'Unknown error',
+    );
+    return res.status(500).json({ message: 'An error occurred. Please try again later.' });
   }
-
-  const isValid = await bcrypt.compare(currentPassword, user.passwordHash);
-  if (!isValid) {
-    return res.status(401).json({ message: 'Current password is incorrect' });
-  }
-
-  const passwordHash = await bcrypt.hash(newPassword, 10);
-  await prisma.user.update({
-    where: { id: userId },
-    data: { passwordHash },
-  });
-
-  return res.json({ message: 'Password changed successfully' });
 }

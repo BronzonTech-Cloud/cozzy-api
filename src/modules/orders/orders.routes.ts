@@ -49,6 +49,10 @@ export const ordersRouter = Router();
  *               currency:
  *                 type: string
  *                 default: USD
+ *               couponId:
+ *                 type: string
+ *                 format: uuid
+ *                 description: Optional coupon id to apply to the order
  *     responses:
  *       201:
  *         description: Order created successfully

@@ -1,4 +1,4 @@
-import { DiscountType } from '@prisma/client';
+import { Coupon, DiscountType } from '@prisma/client';
 
 import { prisma } from '../../config/prisma';
 
@@ -16,12 +16,18 @@ export interface CouponValidationResult {
 
 /**
  * Validate and calculate discount for a coupon
+ * Accepts either a coupon code (string) or a Coupon object to avoid double lookups
  */
 export async function validateAndCalculateCoupon(
-  code: string,
+  couponOrCode: string | Coupon,
   totalCents: number,
 ): Promise<CouponValidationResult> {
-  const coupon = await prisma.coupon.findUnique({ where: { code } });
+  // If string, fetch coupon by code; if object, use it directly
+  const coupon =
+    typeof couponOrCode === 'string'
+      ? await prisma.coupon.findUnique({ where: { code: couponOrCode } })
+      : couponOrCode;
+
   if (!coupon) {
     return { valid: false, discountCents: 0, error: 'Coupon not found' };
   }
@@ -41,7 +47,8 @@ export async function validateAndCalculateCoupon(
   }
 
   // Check usage limit
-  if (coupon.usageLimit && coupon.usageCount >= coupon.usageLimit) {
+  // Explicitly check for null/undefined to enforce usageLimit = 0
+  if (coupon.usageLimit != null && coupon.usageCount >= coupon.usageLimit) {
     return { valid: false, discountCents: 0, error: 'Coupon usage limit reached' };
   }
 

@@ -1,8 +1,12 @@
 import request from 'supertest';
 
 import { createApp } from '../src/app';
-import { createTestUser, createTestCategory, createTestProduct, cleanupDatabase } from './helpers';
-import { prisma } from '../src/config/prisma';
+import {
+  createTestUserAndLogin,
+  createTestCategory,
+  createTestProduct,
+  cleanupDatabase,
+} from './helpers';
 
 const app = createApp();
 
@@ -15,24 +19,13 @@ describe('Wishlist', () => {
 
   beforeEach(async () => {
     await cleanupDatabase();
-    await createTestUser('user@example.com', 'USER');
-    await createTestUser('user2@example.com', 'USER');
 
-    const loginRes = await request(app).post('/api/v1/auth/login').send({
-      email: 'user@example.com',
-      password: 'password123',
-    });
-    expect(loginRes.status).toBe(200);
-    expect(loginRes.body).toHaveProperty('accessToken');
-    userToken = loginRes.body.accessToken;
+    // Create users and get tokens using helper
+    const userResult = await createTestUserAndLogin(app, 'user@example.com', 'USER');
+    userToken = userResult.token;
 
-    const loginRes2 = await request(app).post('/api/v1/auth/login').send({
-      email: 'user2@example.com',
-      password: 'password123',
-    });
-    expect(loginRes2.status).toBe(200);
-    expect(loginRes2.body).toHaveProperty('accessToken');
-    user2Token = loginRes2.body.accessToken;
+    const user2Result = await createTestUserAndLogin(app, 'user2@example.com', 'USER');
+    user2Token = user2Result.token;
 
     const category = await createTestCategory('Electronics');
     categoryId = category.id;
@@ -139,19 +132,11 @@ describe('Wishlist', () => {
     });
 
     it('should reject adding inactive product', async () => {
-      // Create inactive product
-      const inactiveProduct = await prisma.product.create({
-        data: {
-          title: 'Inactive Product',
-          slug: 'inactive-product',
-          description: 'Inactive product description',
-          priceCents: 1000,
-          currency: 'USD',
-          images: [],
-          active: false,
-          stock: 10,
-          categoryId,
-        },
+      // Create inactive product using helper to ensure unique slug
+      const inactiveProduct = await createTestProduct(categoryId, {
+        title: 'Inactive Product',
+        active: false,
+        stock: 10,
       });
 
       const res = await request(app)

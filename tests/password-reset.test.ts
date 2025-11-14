@@ -1,10 +1,21 @@
 import request from 'supertest';
+import { vi } from 'vitest';
 
 import { createApp } from '../src/app';
 import { prisma } from '../src/config/prisma';
 import { createTestUser, cleanupDatabase } from './helpers';
 
 const app = createApp();
+
+// Mock sendEmail for testing email failure scenarios
+const mockSendEmail = vi.fn();
+vi.mock('../src/utils/email', async () => {
+  const actual = await vi.importActual('../src/utils/email');
+  return {
+    ...actual,
+    sendEmail: (...args: unknown[]) => mockSendEmail(...args),
+  };
+});
 
 describe('Password Reset', () => {
   let userEmail: string;
@@ -15,6 +26,8 @@ describe('Password Reset', () => {
     const user = await createTestUser('user@example.com', 'USER');
     userEmail = user.email;
     userId = user.id;
+    // Reset mock to default behavior (resolve successfully)
+    mockSendEmail.mockResolvedValue(undefined);
   });
 
   describe('POST /api/v1/auth/forgot-password', () => {
@@ -82,6 +95,31 @@ describe('Password Reset', () => {
       expect(secondToken).toBeDefined();
       expect(secondToken).not.toBe(firstToken);
     });
+
+    it('should return 400 for email longer than 254 characters', async () => {
+      const longEmail = 'a'.repeat(250) + '@example.com'; // 263 characters
+      const res = await request(app).post('/api/v1/auth/forgot-password').send({
+        email: longEmail,
+      });
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe('Invalid email format');
+    });
+
+    it('should clear token if email sending fails', async () => {
+      mockSendEmail.mockRejectedValueOnce(new Error('Email service unavailable'));
+
+      const res = await request(app).post('/api/v1/auth/forgot-password').send({
+        email: userEmail,
+      });
+
+      expect(res.status).toBe(500);
+
+      // Token should be cleared after email failure
+      const user = await prisma.user.findUnique({ where: { id: userId } });
+      expect(user?.resetPasswordToken).toBeNull();
+      expect(user?.resetPasswordExpires).toBeNull();
+    });
   });
 
   describe('POST /api/v1/auth/reset-password/:token', () => {
@@ -93,16 +131,28 @@ describe('Password Reset', () => {
         email: userEmail,
       });
 
-      const user = await prisma.user.findUnique({ where: { id: userId } });
+      // Wait for token to be visible (handle potential visibility delays in CI)
+      let user: Awaited<ReturnType<typeof prisma.user.findUnique>> | null = null;
+      for (let attempt = 0; attempt < 10; attempt++) {
+        if (attempt > 0) {
+          await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+        }
+
+        user = await prisma.user.findUnique({ where: { id: userId } });
+        if (user?.resetPasswordToken) {
+          break;
+        }
+      }
+
       if (!user?.resetPasswordToken) {
-        throw new Error('Reset token not found');
+        throw new Error('Reset token not found after retries');
       }
       resetToken = user.resetPasswordToken;
     });
 
     it('should reset password with valid token', async () => {
       const res = await request(app).post(`/api/v1/auth/reset-password/${resetToken}`).send({
-        password: 'newpassword123',
+        password: 'NewPassword123',
       });
 
       expect(res.status).toBe(200);
@@ -116,14 +166,14 @@ describe('Password Reset', () => {
       // Verify new password works
       const loginRes = await request(app).post('/api/v1/auth/login').send({
         email: userEmail,
-        password: 'newpassword123',
+        password: 'NewPassword123',
       });
       expect(loginRes.status).toBe(200);
     });
 
     it('should return 400 for invalid token', async () => {
       const res = await request(app).post('/api/v1/auth/reset-password/invalid-token').send({
-        password: 'newpassword123',
+        password: 'NewPassword123',
       });
 
       expect(res.status).toBe(400);
@@ -144,7 +194,7 @@ describe('Password Reset', () => {
       });
 
       const res = await request(app).post('/api/v1/auth/reset-password/expired-token').send({
-        password: 'newpassword123',
+        password: 'NewPassword123',
       });
 
       expect(res.status).toBe(400);
@@ -168,14 +218,14 @@ describe('Password Reset', () => {
     it('should not allow using same token twice', async () => {
       // First reset
       const res1 = await request(app).post(`/api/v1/auth/reset-password/${resetToken}`).send({
-        password: 'newpassword123',
+        password: 'NewPassword123',
       });
 
       expect(res1.status).toBe(200);
 
       // Try to use same token again
       const res2 = await request(app).post(`/api/v1/auth/reset-password/${resetToken}`).send({
-        password: 'anotherpassword123',
+        password: 'AnotherPassword123',
       });
 
       expect(res2.status).toBe(400);
@@ -184,12 +234,40 @@ describe('Password Reset', () => {
 
     it('should hash password correctly', async () => {
       await request(app).post(`/api/v1/auth/reset-password/${resetToken}`).send({
-        password: 'newpassword123',
+        password: 'NewPassword123',
       });
 
       const user = await prisma.user.findUnique({ where: { id: userId } });
       expect(user?.passwordHash).toBeDefined();
-      expect(user?.passwordHash).not.toBe('newpassword123'); // Should be hashed
+      expect(user?.passwordHash).not.toBe('NewPassword123'); // Should be hashed
+    });
+
+    it('should return 400 for password with insufficient complexity', async () => {
+      // Password with only 2 complexity requirements (lowercase + numbers)
+      const res = await request(app).post(`/api/v1/auth/reset-password/${resetToken}`).send({
+        password: 'password123',
+      });
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toContain('at least 3 of the following');
+    });
+
+    it('should accept password with 3 complexity requirements', async () => {
+      // Password with uppercase, lowercase, and numbers (3 requirements)
+      const res = await request(app).post(`/api/v1/auth/reset-password/${resetToken}`).send({
+        password: 'Password123',
+      });
+
+      expect(res.status).toBe(200);
+    });
+
+    it('should accept password with all 4 complexity requirements', async () => {
+      // Password with uppercase, lowercase, numbers, and special chars
+      const res = await request(app).post(`/api/v1/auth/reset-password/${resetToken}`).send({
+        password: 'Password123!',
+      });
+
+      expect(res.status).toBe(200);
     });
   });
 });

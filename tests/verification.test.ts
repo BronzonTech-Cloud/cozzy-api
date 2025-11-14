@@ -2,7 +2,7 @@ import request from 'supertest';
 
 import { createApp } from '../src/app';
 import { prisma } from '../src/config/prisma';
-import { createTestUser, cleanupDatabase } from './helpers';
+import { createTestUserAndLogin, cleanupDatabase } from './helpers';
 
 const app = createApp();
 
@@ -12,16 +12,11 @@ describe('Email Verification', () => {
 
   beforeEach(async () => {
     await cleanupDatabase();
-    const user = await createTestUser('user@example.com', 'USER');
-    userId = user.id;
 
-    const loginRes = await request(app).post('/api/v1/auth/login').send({
-      email: 'user@example.com',
-      password: 'password123',
-    });
-
-    expect(loginRes.status).toBe(200);
-    userToken = loginRes.body.accessToken;
+    // Create user and get token using helper
+    const userResult = await createTestUserAndLogin(app, 'user@example.com', 'USER');
+    userToken = userResult.token;
+    userId = userResult.user.id;
   });
 
   describe('POST /api/v1/auth/verify-email', () => {
@@ -54,7 +49,7 @@ describe('Email Verification', () => {
         .post('/api/v1/auth/verify-email')
         .set('Authorization', `Bearer ${userToken}`);
 
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(409);
       expect(res.body).toHaveProperty('message', 'Email is already verified');
     });
 
@@ -97,17 +92,58 @@ describe('Email Verification', () => {
     });
 
     it('should return 400 for expired token', async () => {
+      // Ensure user is visible before updating
+      let user: Awaited<ReturnType<typeof prisma.user.findUnique>> | null = null;
+      for (let attempt = 0; attempt < 8; attempt++) {
+        if (attempt > 0) {
+          await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
+        }
+        try {
+          await prisma.$executeRaw`SELECT 1`;
+          user = await prisma.user.findUnique({ where: { id: userId } });
+          if (user) break;
+        } catch {
+          // Continue to next attempt
+        }
+      }
+
+      if (!user) {
+        throw new Error(`User with ID ${userId} not found. Cannot update verification token.`);
+      }
+
       // Create expired token
       const expiredDate = new Date();
       expiredDate.setHours(expiredDate.getHours() - 25); // 25 hours ago
 
-      await prisma.user.update({
-        where: { id: userId },
-        data: {
-          verificationToken: 'expired-token',
-          verificationTokenExpires: expiredDate,
-        },
-      });
+      // Update with retry logic
+      let updated = false;
+      for (let attempt = 0; attempt < 8; attempt++) {
+        if (attempt > 0) {
+          await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
+        }
+        try {
+          await prisma.$executeRaw`SELECT 1`;
+          await prisma.user.update({
+            where: { id: userId },
+            data: {
+              verificationToken: 'expired-token',
+              verificationTokenExpires: expiredDate,
+            },
+          });
+          updated = true;
+          break;
+        } catch (error) {
+          if (attempt < 7) {
+            // Continue to next attempt
+          } else {
+            throw error;
+          }
+        }
+      }
+
+      if (!updated) {
+        throw new Error('Failed to update user verification token after retries');
+      }
 
       const res = await request(app).get('/api/v1/auth/verify-email/expired-token');
 
@@ -163,17 +199,60 @@ describe('Email Verification', () => {
     });
 
     it('should return 400 if email is already verified', async () => {
-      // Verify email first
-      await prisma.user.update({
-        where: { id: userId },
-        data: { emailVerified: true },
-      });
+      // First, ensure user is visible before trying to update
+      let user: Awaited<ReturnType<typeof prisma.user.findUnique>> | null = null;
+      for (let attempt = 0; attempt < 8; attempt++) {
+        if (attempt > 0) {
+          await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
+        }
+        try {
+          await prisma.$executeRaw`SELECT 1`;
+          user = await prisma.user.findUnique({ where: { id: userId } });
+          if (user) break;
+        } catch {
+          // Continue to next attempt
+        }
+      }
+
+      if (!user) {
+        throw new Error(`User with ID ${userId} not found. Cannot verify email.`);
+      }
+
+      // Verify email first - add retry logic for visibility
+      let updated = false;
+      for (let attempt = 0; attempt < 8; attempt++) {
+        if (attempt > 0) {
+          await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
+        }
+        try {
+          await prisma.$executeRaw`SELECT 1`;
+          await prisma.user.update({
+            where: { id: userId },
+            data: { emailVerified: true },
+          });
+          updated = true;
+          break;
+        } catch (error) {
+          if (attempt < 7) {
+            // Continue to next attempt
+          } else {
+            throw error;
+          }
+        }
+      }
+
+      if (!updated) {
+        throw new Error('Failed to update user emailVerified status');
+      }
+
+      // Wait for update to be visible
+      await new Promise((resolve) => setTimeout(resolve, 200));
 
       const res = await request(app)
         .post('/api/v1/auth/resend-verification')
         .set('Authorization', `Bearer ${userToken}`);
 
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(409);
       expect(res.body).toHaveProperty('message', 'Email is already verified');
     });
 

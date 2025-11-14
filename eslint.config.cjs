@@ -35,6 +35,8 @@ module.exports = [
         process: 'readonly',
         global: 'readonly',
         Buffer: 'readonly',
+        URL: 'readonly',
+        URLSearchParams: 'readonly',
       },
     },
     rules: {
@@ -60,6 +62,18 @@ module.exports = [
     files: ['src/middleware/auth.ts'],
     rules: {
       '@typescript-eslint/no-namespace': 'off',
+    },
+  },
+  {
+    files: ['src/middleware/**/*.ts'],
+    languageOptions: {
+      globals: {
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
+        setInterval: 'readonly',
+        clearInterval: 'readonly',
+        NodeJS: 'readonly',
+      },
     },
   },
   {

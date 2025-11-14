@@ -1,7 +1,12 @@
 import request from 'supertest';
 
 import { createApp } from '../src/app';
-import { createTestUser, createTestCategory, createTestProduct, cleanupDatabase } from './helpers';
+import {
+  createTestUserAndLogin,
+  createTestCategory,
+  createTestProduct,
+  cleanupDatabase,
+} from './helpers';
 
 const app = createApp();
 
@@ -13,26 +18,25 @@ describe('Product Variants', () => {
 
   beforeEach(async () => {
     await cleanupDatabase();
-    await createTestUser('admin@example.com', 'ADMIN');
-    await createTestUser('user@example.com', 'USER');
 
-    const adminLogin = await request(app).post('/api/v1/auth/login').send({
-      email: 'admin@example.com',
-      password: 'password123',
-    });
-    adminToken = adminLogin.body.accessToken;
+    // Create users and get tokens using helper
+    const adminResult = await createTestUserAndLogin(app, 'admin@example.com', 'ADMIN');
+    adminToken = adminResult.token;
 
-    const userLogin = await request(app).post('/api/v1/auth/login').send({
-      email: 'user@example.com',
-      password: 'password123',
-    });
-    userToken = userLogin.body.accessToken;
+    const userResult = await createTestUserAndLogin(app, 'user@example.com', 'USER');
+    userToken = userResult.token;
 
     const category = await createTestCategory('Electronics');
     categoryId = category.id;
 
+    // Small delay to ensure category is fully visible before creating product
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
     const product = await createTestProduct(categoryId, { title: 'Test Product', stock: 10 });
     productId = product.id;
+
+    // Small delay to ensure product is fully visible before test operations
+    await new Promise((resolve) => setTimeout(resolve, 100));
   });
 
   describe('GET /api/v1/products/:id/variants', () => {
@@ -147,6 +151,9 @@ describe('Product Variants', () => {
           stock: 5,
         });
 
+      expect(res.status).toBe(201);
+      expect(res.body).toHaveProperty('variant');
+      expect(res.body.variant).toHaveProperty('id');
       variantId = res.body.variant.id;
     });
 
@@ -220,6 +227,9 @@ describe('Product Variants', () => {
           sku: 'PROD-LG-001',
         });
 
+      expect(res.status).toBe(201);
+      expect(res.body).toHaveProperty('variant');
+      expect(res.body.variant).toHaveProperty('id');
       variantId = res.body.variant.id;
     });
 

@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { Request, Response } from 'express';
 
 import { prisma } from '../../config/prisma';
@@ -68,28 +69,46 @@ export async function addToWishlist(req: Request, res: Response) {
     return res.status(409).json({ message: 'Product is already in wishlist' });
   }
 
-  // Add to wishlist
-  const wishlistItem = await prisma.wishlist.create({
-    data: {
-      userId,
-      productId,
-    },
-    include: {
-      product: {
-        include: {
-          category: true,
+  // Add to wishlist with error handling
+  try {
+    const wishlistItem = await prisma.wishlist.create({
+      data: {
+        userId,
+        productId,
+      },
+      include: {
+        product: {
+          include: {
+            category: true,
+          },
         },
       },
-    },
-  });
+    });
 
-  res.status(201).json({
-    item: {
-      id: wishlistItem.id,
-      product: wishlistItem.product,
-      createdAt: wishlistItem.createdAt,
-    },
-  });
+    res.status(201).json({
+      item: {
+        id: wishlistItem.id,
+        product: wishlistItem.product,
+        createdAt: wishlistItem.createdAt,
+      },
+    });
+  } catch (error: unknown) {
+    // Handle Prisma errors and map to appropriate HTTP status codes
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      if (error.code === 'P2003') {
+        // Foreign key constraint violation
+        // This could mean userId or productId doesn't exist
+        return res.status(404).json({ message: 'Product or user not found' });
+      }
+      if (error.code === 'P2002') {
+        // Unique constraint violation (shouldn't happen due to earlier check, but handle it)
+        return res.status(409).json({ message: 'Product is already in wishlist' });
+      }
+    }
+    // Unexpected error
+    console.error('Error adding to wishlist:', error);
+    return res.status(500).json({ message: 'Internal server error' });
+  }
 }
 
 /**
@@ -114,17 +133,30 @@ export async function removeFromWishlist(req: Request, res: Response) {
     return res.status(404).json({ message: 'Product not found in wishlist' });
   }
 
-  // Remove from wishlist
-  await prisma.wishlist.delete({
-    where: {
-      userId_productId: {
-        userId,
-        productId,
+  // Remove from wishlist with error handling
+  try {
+    await prisma.wishlist.delete({
+      where: {
+        userId_productId: {
+          userId,
+          productId,
+        },
       },
-    },
-  });
+    });
 
-  res.status(204).send();
+    res.status(204).send();
+  } catch (error: unknown) {
+    // Handle Prisma errors
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      if (error.code === 'P2025') {
+        // Record not found (shouldn't happen due to earlier check, but handle it)
+        return res.status(404).json({ message: 'Product not found in wishlist' });
+      }
+    }
+    // Unexpected error
+    console.error('Error removing from wishlist:', error);
+    return res.status(500).json({ message: 'Internal server error' });
+  }
 }
 
 /**

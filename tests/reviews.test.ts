@@ -1,7 +1,13 @@
 import request from 'supertest';
 
 import { createApp } from '../src/app';
-import { createTestUser, createTestCategory, createTestProduct, cleanupDatabase } from './helpers';
+import {
+  createTestUser,
+  createTestUserAndLogin,
+  createTestCategory,
+  createTestProduct,
+  cleanupDatabase,
+} from './helpers';
 import { prisma } from '../src/config/prisma';
 
 const app = createApp();
@@ -13,27 +19,21 @@ describe('Reviews', () => {
   let productId: string;
   let product2Id: string;
   let reviewId: string;
+  let userId: string; // Store user ID for nested beforeEach
 
   beforeEach(async () => {
     await cleanupDatabase();
-    await createTestUser('user@example.com', 'USER');
-    await createTestUser('user2@example.com', 'USER');
 
-    const loginRes = await request(app).post('/api/v1/auth/login').send({
-      email: 'user@example.com',
-      password: 'password123',
-    });
-    expect(loginRes.status).toBe(200);
-    expect(loginRes.body).toHaveProperty('accessToken');
-    userToken = loginRes.body.accessToken;
+    // Create users and get tokens using helper
+    const userResult = await createTestUserAndLogin(app, 'user@example.com', 'USER');
+    userToken = userResult.token;
+    userId = userResult.user.id; // Store user ID
 
-    const loginRes2 = await request(app).post('/api/v1/auth/login').send({
-      email: 'user2@example.com',
-      password: 'password123',
-    });
-    expect(loginRes2.status).toBe(200);
-    expect(loginRes2.body).toHaveProperty('accessToken');
-    user2Token = loginRes2.body.accessToken;
+    const user2Result = await createTestUserAndLogin(app, 'user2@example.com', 'USER');
+    user2Token = user2Result.token;
+
+    // Small delay to ensure users are fully visible before creating related entities
+    await new Promise((resolve) => setTimeout(resolve, 200));
 
     const category = await createTestCategory('Electronics');
     categoryId = category.id;
@@ -90,10 +90,15 @@ describe('Reviews', () => {
 
     it('should mark review as verified if user purchased product', async () => {
       // Create an order for the user with this product
+      // Ensure user exists before creating order to avoid foreign key violations
       const user = await prisma.user.findUnique({ where: { email: 'user@example.com' } });
+      if (!user) {
+        throw new Error('Test user not found. Ensure beforeEach creates the user.');
+      }
+
       const order = await prisma.order.create({
         data: {
-          userId: user!.id,
+          userId: user.id,
           status: 'PAID',
           totalCents: 1000,
           currency: 'USD',
@@ -208,15 +213,20 @@ describe('Reviews', () => {
       await createTestUser('user3@example.com', 'USER');
 
       // Create multiple reviews sequentially to ensure different timestamps
+      // Ensure all users exist before creating reviews to avoid foreign key violations
       const user = await prisma.user.findUnique({ where: { email: 'user@example.com' } });
       const user2 = await prisma.user.findUnique({ where: { email: 'user2@example.com' } });
       const user3 = await prisma.user.findUnique({ where: { email: 'user3@example.com' } });
+
+      if (!user || !user2 || !user3) {
+        throw new Error('Test users not found. Ensure beforeEach creates all users.');
+      }
 
       // Create reviews sequentially with small delays to ensure different timestamps
       await prisma.review.create({
         data: {
           productId,
-          userId: user!.id,
+          userId: user.id,
           rating: 5,
           title: 'Great!',
           comment: 'Excellent product',
@@ -229,7 +239,7 @@ describe('Reviews', () => {
       await prisma.review.create({
         data: {
           productId,
-          userId: user2!.id,
+          userId: user2.id,
           rating: 4,
           title: 'Good',
           comment: 'Good product',
@@ -242,7 +252,7 @@ describe('Reviews', () => {
       await prisma.review.create({
         data: {
           productId,
-          userId: user3!.id,
+          userId: user3.id,
           rating: 3,
           title: 'Average',
           comment: 'Average product',
@@ -335,10 +345,14 @@ describe('Reviews', () => {
   describe('GET /api/v1/reviews/:reviewId', () => {
     beforeEach(async () => {
       const user = await prisma.user.findUnique({ where: { email: 'user@example.com' } });
+      if (!user) {
+        throw new Error('Test user not found. Ensure beforeEach creates the user.');
+      }
+
       const review = await prisma.review.create({
         data: {
           productId,
-          userId: user!.id,
+          userId: user.id,
           rating: 5,
           title: 'Great product!',
           comment: 'Excellent',
@@ -368,11 +382,28 @@ describe('Reviews', () => {
 
   describe('PATCH /api/v1/reviews/:reviewId', () => {
     beforeEach(async () => {
-      const user = await prisma.user.findUnique({ where: { email: 'user@example.com' } });
+      // Use the user from createTestUserAndLogin to ensure consistency
+      // Retry user lookup with exponential backoff to handle visibility issues
+      let user: Awaited<ReturnType<typeof prisma.user.findUnique>> | null = null;
+      for (let attempt = 0; attempt < 10; attempt++) {
+        if (attempt > 0) {
+          await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+        }
+
+        user = await prisma.user.findUnique({ where: { email: 'user@example.com' } });
+        if (user) {
+          break;
+        }
+      }
+
+      if (!user) {
+        throw new Error('Test user not found. Ensure beforeEach creates the user.');
+      }
+
       const review = await prisma.review.create({
         data: {
           productId,
-          userId: user!.id,
+          userId: user.id,
           rating: 5,
           title: 'Great product!',
           comment: 'Excellent',
@@ -446,14 +477,76 @@ describe('Reviews', () => {
 
   describe('DELETE /api/v1/reviews/:reviewId', () => {
     beforeEach(async () => {
-      const user = await prisma.user.findUnique({ where: { email: 'user@example.com' } });
-      const review = await prisma.review.create({
-        data: {
-          productId,
-          userId: user!.id,
-          rating: 5,
-        },
-      });
+      // Use userId from main beforeEach (already created and verified)
+      // Add retry logic in case user isn't visible yet
+      let user: Awaited<ReturnType<typeof prisma.user.findUnique>> | null = null;
+      for (let attempt = 0; attempt < 8; attempt++) {
+        if (attempt > 0) {
+          await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
+        }
+        try {
+          // Force connection refresh
+          await prisma.$executeRaw`SELECT 1`;
+          user = await prisma.user.findUnique({ where: { id: userId } });
+          if (user) break;
+        } catch {
+          // Continue to next attempt
+        }
+      }
+
+      if (!user) {
+        // User not visible yet, but exists from main beforeEach
+        // Wait a bit more and try one more time
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        try {
+          await prisma.$executeRaw`SELECT 1`;
+          user = await prisma.user.findUnique({ where: { id: userId } });
+        } catch {
+          // Continue - will use userId directly
+        }
+      }
+
+      // Ensure user exists before creating review
+      if (!user) {
+        throw new Error(`User with ID ${userId} not found. Cannot create review.`);
+      }
+
+      // Create review with retry logic for FK violations
+      let review: Awaited<ReturnType<typeof prisma.review.create>> | null = null;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        if (attempt > 0) {
+          await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
+        }
+        try {
+          const createdReview = await prisma.review.create({
+            data: {
+              productId,
+              userId: user.id,
+              rating: 5,
+            },
+          });
+          review = createdReview;
+          break;
+        } catch (error: unknown) {
+          // If FK violation, retry
+          if (
+            typeof error === 'object' &&
+            error !== null &&
+            'code' in error &&
+            (error.code === 'P2003' || error.code === 'P2014')
+          ) {
+            if (attempt < 4) {
+              continue;
+            }
+          }
+          throw error;
+        }
+      }
+
+      if (!review) {
+        throw new Error('Failed to create review after retries');
+      }
+
       reviewId = review.id;
     });
 

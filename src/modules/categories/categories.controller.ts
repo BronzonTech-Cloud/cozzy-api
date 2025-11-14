@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 
 import { prisma } from '../../config/prisma';
+import { invalidateCache } from '../../middleware/cache';
 
 function slugify(input: string) {
   return input
@@ -28,6 +29,11 @@ export async function createCategory(req: Request, res: Response) {
   const existing = await prisma.category.findFirst({ where: { OR: [{ name }, { slug }] } });
   if (existing) return res.status(409).json({ message: 'Category already exists' });
   const category = await prisma.category.create({ data: { name, slug } });
+
+  // Invalidate category caches
+  invalidateCache('categories:.*');
+  invalidateCache('category:.*');
+
   res.status(201).json({ category });
 }
 
@@ -41,6 +47,11 @@ export async function updateCategory(req: Request, res: Response) {
   }
   try {
     const category = await prisma.category.update({ where: { id }, data });
+
+    // Invalidate category caches
+    invalidateCache('categories:.*');
+    invalidateCache('category:.*');
+
     res.json({ category });
   } catch {
     res.status(404).json({ message: 'Category not found' });
@@ -51,6 +62,11 @@ export async function deleteCategory(req: Request, res: Response) {
   const { id } = req.params as { id: string };
   try {
     await prisma.category.delete({ where: { id } });
+
+    // Invalidate category caches
+    invalidateCache('categories:.*');
+    invalidateCache('category:.*');
+
     res.status(204).send();
   } catch {
     res.status(404).json({ message: 'Category not found' });

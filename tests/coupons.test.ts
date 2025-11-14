@@ -2,7 +2,7 @@ import request from 'supertest';
 
 import { createApp } from '../src/app';
 import { prisma } from '../src/config/prisma';
-import { createTestUser, cleanupDatabase } from './helpers';
+import { cleanupDatabase, createTestUserAndLogin } from './helpers';
 
 const app = createApp();
 
@@ -12,20 +12,21 @@ describe('Coupons', () => {
 
   beforeEach(async () => {
     await cleanupDatabase();
-    await createTestUser('admin@example.com', 'ADMIN');
-    await createTestUser('user@example.com', 'USER');
 
-    const adminLogin = await request(app).post('/api/v1/auth/login').send({
-      email: 'admin@example.com',
-      password: 'password123',
-    });
-    adminToken = adminLogin.body.accessToken;
+    // Create users and get tokens, ensuring login succeeds
+    const adminResult = await createTestUserAndLogin(app, 'admin@example.com', 'ADMIN');
+    adminToken = adminResult.token;
 
-    const userLogin = await request(app).post('/api/v1/auth/login').send({
-      email: 'user@example.com',
-      password: 'password123',
-    });
-    userToken = userLogin.body.accessToken;
+    const userResult = await createTestUserAndLogin(app, 'user@example.com', 'USER');
+    userToken = userResult.token;
+
+    // Small delay to ensure users are fully visible before test operations
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    // Verify tokens are set
+    if (!adminToken || !userToken) {
+      throw new Error('Failed to obtain authentication tokens in test setup');
+    }
   });
 
   describe('POST /api/v1/coupons', () => {
@@ -356,6 +357,101 @@ describe('Coupons', () => {
         });
 
       expect(res.status).toBe(404);
+    });
+
+    it('should return 400 for negative minPurchase', async () => {
+      const res = await request(app)
+        .patch(`/api/v1/coupons/${couponId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          minPurchase: -100,
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe('minPurchase must be a non-negative integer');
+    });
+
+    it('should return 400 for negative maxDiscount', async () => {
+      const res = await request(app)
+        .patch(`/api/v1/coupons/${couponId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          maxDiscount: -50,
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe('maxDiscount must be a non-negative integer');
+    });
+
+    it('should return 400 for negative usageLimit', async () => {
+      const res = await request(app)
+        .patch(`/api/v1/coupons/${couponId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          usageLimit: -10,
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe('usageLimit must be a non-negative integer');
+    });
+
+    it('should return 400 for invalid date format', async () => {
+      const res = await request(app)
+        .patch(`/api/v1/coupons/${couponId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          validFrom: 'invalid-date',
+        });
+
+      expect(res.status).toBe(400);
+      // Zod validation catches invalid datetime format before controller
+      expect(res.body.message).toMatch(/Invalid|date|format/i);
+    });
+
+    it('should return 400 when validUntil is before validFrom', async () => {
+      const validFrom = new Date();
+      const validUntil = new Date();
+      validUntil.setDate(validUntil.getDate() - 1); // Yesterday
+
+      const res = await request(app)
+        .patch(`/api/v1/coupons/${couponId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          validFrom: validFrom.toISOString(),
+          validUntil: validUntil.toISOString(),
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe('validUntil must be after validFrom');
+    });
+
+    it('should return 409 for duplicate coupon code', async () => {
+      // Create another coupon
+      const validFrom = new Date();
+      const validUntil = new Date();
+      validUntil.setMonth(validUntil.getMonth() + 1);
+
+      const otherCoupon = await prisma.coupon.create({
+        data: {
+          code: 'OTHER10',
+          discountType: 'PERCENTAGE',
+          discountValue: 10,
+          validFrom,
+          validUntil,
+          active: true,
+        },
+      });
+
+      // Try to update first coupon with second coupon's code
+      const res = await request(app)
+        .patch(`/api/v1/coupons/${couponId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          code: otherCoupon.code,
+        });
+
+      expect(res.status).toBe(409);
+      expect(res.body.message).toBe('Coupon code already exists');
     });
   });
 

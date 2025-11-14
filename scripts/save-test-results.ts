@@ -8,7 +8,7 @@ const resultsFile = join(resultsDir, 'tests.txt');
 // Create directory if it doesn't exist
 try {
   mkdirSync(resultsDir, { recursive: true });
-} catch (error) {
+} catch {
   // Directory might already exist, ignore
 }
 

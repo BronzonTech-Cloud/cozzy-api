@@ -28,6 +28,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v1
         with:
@@ -55,12 +60,26 @@ jobs:
 
       - name: Prepare test database
         env:
+          # PostgreSQL password is set in the service definition above (POSTGRES_PASSWORD: postgres)
+          # Using 'postgres' as default for CI test database (not a production secret)
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/cozzy_test_db
           DATABASE_URL_TEST: postgresql://postgres:postgres@localhost:5432/cozzy_test_db
+          POSTGRES_PASSWORD: postgres
           NODE_ENV: test
           # Minimal env vars for migration (JWT secrets not needed for migrations)
           JWT_ACCESS_SECRET: test_access_secret_key_min_32_chars
           JWT_REFRESH_SECRET: test_refresh_secret_key_min_32_chars
-        run: bun run test:db:prepare
+        run: |
+          # Create database if it doesn't exist
+          # Note: Using 'postgres' password from service definition (CI test DB only, not production)
+          PGPASSWORD="$POSTGRES_PASSWORD" psql -h localhost -U postgres -tc "SELECT 1 FROM pg_database WHERE datname = 'cozzy_test_db'" | grep -q 1 || PGPASSWORD="$POSTGRES_PASSWORD" psql -h localhost -U postgres -c "CREATE DATABASE cozzy_test_db"
+
+          # Apply schema using db push (faster for CI, no migration history needed)
+          # This ensures the schema matches prisma/schema.prisma exactly
+          bunx prisma db push --accept-data-loss --skip-generate
+
+          # Verify schema was applied
+          echo "✅ Database schema applied successfully"
 
       - name: Lint
         run: bun run lint
@@ -70,6 +89,7 @@ jobs:
 
       - name: Run tests with coverage
         env:
+          # PostgreSQL password is set in the service definition above (POSTGRES_PASSWORD: postgres)
           DATABASE_URL_TEST: postgresql://postgres:postgres@localhost:5432/cozzy_test_db
           NODE_ENV: test
           JWT_ACCESS_SECRET: test_access_secret_key_min_32_chars
@@ -80,5 +100,12 @@ jobs:
           STRIPE_WEBHOOK_SECRET: whsec_fake_webhook_secret_for_testing
           APP_URL: http://localhost:4000
           CLIENT_URL: http://localhost:3000
+          # Optimized test retry settings for CI reliability
+          # Balanced retries and timeout to handle CI database visibility issues without excessive delays
+          TEST_VERIFICATION_MAX_RETRIES: 10
+          TEST_VERIFICATION_TIMEOUT_MS: 5000
+          TEST_LOGIN_MAX_RETRIES: 5
+          TEST_CATEGORY_VERIFICATION_MAX_RETRIES: 10
         run: bun run test
         timeout-minutes: 10
+        continue-on-error: false

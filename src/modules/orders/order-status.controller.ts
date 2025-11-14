@@ -11,6 +11,11 @@ export async function updateOrderStatus(req: Request, res: Response) {
     trackingNumber?: string;
   };
 
+  // Verify admin authorization before any database calls
+  if (!req.user || req.user.role !== 'ADMIN') {
+    return res.status(403).json({ message: 'Forbidden' });
+  }
+
   const order = await prisma.order.findUnique({ where: { id } });
   if (!order) {
     return res.status(404).json({ message: 'Order not found' });
@@ -42,11 +47,6 @@ export async function updateOrderStatus(req: Request, res: Response) {
     // Set shippedAt when status changes to FULFILLED
     if (status === 'FULFILLED' && order.status !== 'FULFILLED') {
       updateData.shippedAt = new Date();
-    }
-
-    // Set deliveredAt when status changes to FULFILLED (can be updated later)
-    if (status === 'FULFILLED' && !order.deliveredAt) {
-      // This can be updated separately when actually delivered
     }
 
     return tx.order.update({
@@ -184,19 +184,49 @@ export async function getOrderHistory(req: Request, res: Response) {
     where.status = status;
   }
 
-  // Filter by date range
+  // Filter by date range with validation
   if (startDate || endDate) {
     where.createdAt = {};
     if (startDate) {
-      where.createdAt.gte = new Date(startDate);
+      const parsedStartDate = new Date(startDate);
+      if (isNaN(parsedStartDate.getTime())) {
+        return res.status(400).json({ message: 'Invalid date format for startDate' });
+      }
+      where.createdAt.gte = parsedStartDate;
     }
     if (endDate) {
-      where.createdAt.lte = new Date(endDate);
+      const parsedEndDate = new Date(endDate);
+      if (isNaN(parsedEndDate.getTime())) {
+        return res.status(400).json({ message: 'Invalid date format for endDate' });
+      }
+      where.createdAt.lte = parsedEndDate;
     }
   }
 
-  const take = limit ? parseInt(limit, 10) : 20;
-  const skip = offset ? parseInt(offset, 10) : 0;
+  // Validate and parse limit/offset with safe defaults
+  let take: number;
+  let skip: number;
+
+  if (limit) {
+    const parsedLimit = Number.parseInt(limit, 10);
+    if (isNaN(parsedLimit) || !Number.isInteger(parsedLimit) || parsedLimit <= 0) {
+      return res.status(400).json({ message: 'limit must be a positive integer' });
+    }
+    // Clamp limit to a sensible max (100)
+    take = Math.min(parsedLimit, 100);
+  } else {
+    take = 20; // Default limit
+  }
+
+  if (offset) {
+    const parsedOffset = Number.parseInt(offset, 10);
+    if (isNaN(parsedOffset) || !Number.isInteger(parsedOffset) || parsedOffset < 0) {
+      return res.status(400).json({ message: 'offset must be a non-negative integer' });
+    }
+    skip = parsedOffset;
+  } else {
+    skip = 0; // Default offset
+  }
 
   const [orders, total] = await Promise.all([
     prisma.order.findMany({

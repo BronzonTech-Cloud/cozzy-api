@@ -2,6 +2,11 @@ import { Router } from 'express';
 
 import { authGuard } from '../../middleware/auth';
 import { validate } from '../../middleware/validate';
+import {
+  authLimiter,
+  passwordResetLimiter,
+  emailVerificationLimiter,
+} from '../../middleware/rate-limit';
 import { login, me, refresh, register } from './auth.controller';
 import { loginSchema, refreshSchema, registerSchema } from './auth.schema';
 import { forgotPassword, resetPassword } from './password-reset.controller';
@@ -58,7 +63,7 @@ export const authRouter = Router();
  *       400:
  *         $ref: '#/components/responses/ValidationError'
  */
-authRouter.post('/register', validate({ body: registerSchema }), register);
+authRouter.post('/register', authLimiter, validate({ body: registerSchema }), register);
 
 /**
  * @swagger
@@ -100,7 +105,7 @@ authRouter.post('/register', validate({ body: registerSchema }), register);
  *       400:
  *         $ref: '#/components/responses/ValidationError'
  */
-authRouter.post('/login', validate({ body: loginSchema }), login);
+authRouter.post('/login', authLimiter, validate({ body: loginSchema }), login);
 
 /**
  * @swagger
@@ -187,7 +192,7 @@ authRouter.get('/me', authGuard, me);
  *       404:
  *         $ref: '#/components/responses/NotFound'
  */
-authRouter.post('/verify-email', authGuard, requestVerificationEmail);
+authRouter.post('/verify-email', emailVerificationLimiter, authGuard, requestVerificationEmail);
 
 /**
  * @swagger
@@ -214,7 +219,7 @@ authRouter.post('/verify-email', authGuard, requestVerificationEmail);
  *       400:
  *         description: Invalid or expired verification token
  */
-authRouter.get('/verify-email/:token', verifyEmail);
+authRouter.get('/verify-email/:token', emailVerificationLimiter, verifyEmail);
 
 /**
  * @swagger
@@ -240,7 +245,12 @@ authRouter.get('/verify-email/:token', verifyEmail);
  *       404:
  *         $ref: '#/components/responses/NotFound'
  */
-authRouter.post('/resend-verification', authGuard, resendVerificationEmail);
+authRouter.post(
+  '/resend-verification',
+  emailVerificationLimiter,
+  authGuard,
+  resendVerificationEmail,
+);
 
 /**
  * @swagger
@@ -271,7 +281,12 @@ authRouter.post('/resend-verification', authGuard, resendVerificationEmail);
  *       400:
  *         $ref: '#/components/responses/ValidationError'
  */
-authRouter.post('/forgot-password', validate({ body: forgotPasswordSchema }), forgotPassword);
+authRouter.post(
+  '/forgot-password',
+  passwordResetLimiter,
+  validate({ body: forgotPasswordSchema }),
+  forgotPassword,
+);
 
 /**
  * @swagger
@@ -316,4 +331,9 @@ authRouter.post('/forgot-password', validate({ body: forgotPasswordSchema }), fo
  *               properties:
  *                 message: { type: string, example: 'Invalid or expired reset token' }
  */
-authRouter.post('/reset-password/:token', validate({ body: resetPasswordSchema }), resetPassword);
+authRouter.post(
+  '/reset-password/:token',
+  passwordResetLimiter,
+  validate({ body: resetPasswordSchema }),
+  resetPassword,
+);

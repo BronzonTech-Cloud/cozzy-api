@@ -1,7 +1,12 @@
 import request from 'supertest';
 
 import { createApp } from '../src/app';
-import { createTestUser, createTestCategory, createTestProduct, cleanupDatabase } from './helpers';
+import {
+  createTestUserAndLogin,
+  createTestCategory,
+  createTestProduct,
+  cleanupDatabase,
+} from './helpers';
 
 const app = createApp();
 
@@ -13,24 +18,13 @@ describe('Orders', () => {
 
   beforeEach(async () => {
     await cleanupDatabase();
-    await createTestUser('user@example.com', 'USER');
-    await createTestUser('admin@example.com', 'ADMIN');
 
-    const userLogin = await request(app).post('/api/v1/auth/login').send({
-      email: 'user@example.com',
-      password: 'password123',
-    });
-    expect(userLogin.status).toBe(200);
-    expect(userLogin.body).toHaveProperty('accessToken');
-    userToken = userLogin.body.accessToken;
+    // Create users and get tokens using helper
+    const userResult = await createTestUserAndLogin(app, 'user@example.com', 'USER');
+    userToken = userResult.token;
 
-    const adminLogin = await request(app).post('/api/v1/auth/login').send({
-      email: 'admin@example.com',
-      password: 'password123',
-    });
-    expect(adminLogin.status).toBe(200);
-    expect(adminLogin.body).toHaveProperty('accessToken');
-    adminToken = adminLogin.body.accessToken;
+    const adminResult = await createTestUserAndLogin(app, 'admin@example.com', 'ADMIN');
+    adminToken = adminResult.token;
 
     const category = await createTestCategory('Electronics');
     categoryId = category.id;
@@ -86,16 +80,95 @@ describe('Orders', () => {
 
       expect(res.status).toBe(401);
     });
+
+    it('should apply valid coupon to order', async () => {
+      // Create a valid coupon
+      const couponRes = await request(app)
+        .post('/api/v1/coupons')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          code: 'ORDER10',
+          description: '10% off',
+          discountType: 'PERCENTAGE',
+          discountValue: 10,
+          validFrom: new Date().toISOString(),
+          validUntil: new Date(Date.now() + 86400000).toISOString(),
+          active: true,
+        });
+
+      expect(couponRes.status).toBe(201);
+      const couponId = couponRes.body.coupon.id;
+
+      const res = await request(app)
+        .post('/api/v1/orders')
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({
+          items: [{ productId, quantity: 1 }],
+          couponId,
+        });
+
+      expect(res.status).toBe(201);
+      expect(res.body.order).toHaveProperty('couponId', couponId);
+      expect(res.body.order.discountCents).toBeGreaterThan(0);
+    });
+
+    it('should reject order with invalid coupon', async () => {
+      // Use a valid UUID format that doesn't exist
+      const res = await request(app)
+        .post('/api/v1/orders')
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({
+          items: [{ productId, quantity: 1 }],
+          couponId: '00000000-0000-0000-0000-000000000000',
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe('Coupon not found');
+    });
+
+    it('should reject order with expired coupon', async () => {
+      // Create an expired coupon
+      const couponRes = await request(app)
+        .post('/api/v1/coupons')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          code: 'EXPIRED10',
+          description: 'Expired coupon',
+          discountType: 'PERCENTAGE',
+          discountValue: 10,
+          validFrom: new Date(Date.now() - 172800000).toISOString(), // 2 days ago
+          validUntil: new Date(Date.now() - 86400000).toISOString(), // Yesterday
+          active: true,
+        });
+
+      expect(couponRes.status).toBe(201);
+      const couponId = couponRes.body.coupon.id;
+
+      const res = await request(app)
+        .post('/api/v1/orders')
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({
+          items: [{ productId, quantity: 1 }],
+          couponId,
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toContain('expired');
+    });
   });
 
   describe('GET /api/v1/orders', () => {
     it('should list user orders', async () => {
-      await request(app)
+      // Create an order first (if not already created in beforeEach)
+      const createRes = await request(app)
         .post('/api/v1/orders')
         .set('Authorization', `Bearer ${userToken}`)
         .send({
           items: [{ productId, quantity: 1 }],
         });
+
+      // If order creation failed, skip this test
+      expect(createRes.status).toBe(201);
 
       const res = await request(app)
         .get('/api/v1/orders')

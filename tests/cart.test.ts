@@ -1,7 +1,12 @@
 import request from 'supertest';
 
 import { createApp } from '../src/app';
-import { createTestUser, createTestCategory, createTestProduct, cleanupDatabase } from './helpers';
+import {
+  createTestUserAndLogin,
+  createTestCategory,
+  createTestProduct,
+  cleanupDatabase,
+} from './helpers';
 
 const app = createApp();
 
@@ -13,16 +18,10 @@ describe('Cart', () => {
 
   beforeEach(async () => {
     await cleanupDatabase();
-    await createTestUser('user@example.com', 'USER');
 
-    const loginRes = await request(app).post('/api/v1/auth/login').send({
-      email: 'user@example.com',
-      password: 'password123',
-    });
-
-    expect(loginRes.status).toBe(200);
-    expect(loginRes.body).toHaveProperty('accessToken');
-    userToken = loginRes.body.accessToken;
+    // Create user and get token using helper
+    const userResult = await createTestUserAndLogin(app, 'user@example.com', 'USER');
+    userToken = userResult.token;
 
     const category = await createTestCategory('Electronics');
     categoryId = category.id;
@@ -127,20 +126,11 @@ describe('Cart', () => {
     });
 
     it('should reject adding inactive product', async () => {
-      // Create inactive product directly
-      const { prisma } = await import('../src/config/prisma');
-      const inactiveProduct = await prisma.product.create({
-        data: {
-          title: 'Inactive Product',
-          slug: 'inactive-product',
-          description: 'Inactive product description',
-          priceCents: 1000,
-          currency: 'USD',
-          images: [],
-          active: false, // Inactive product
-          stock: 10,
-          categoryId,
-        },
+      // Create inactive product using helper to ensure unique slug and proper setup
+      const inactiveProduct = await createTestProduct(categoryId, {
+        title: 'Inactive Product',
+        active: false,
+        stock: 10,
       });
 
       const res = await request(app)
@@ -188,6 +178,10 @@ describe('Cart', () => {
         .set('Authorization', `Bearer ${userToken}`)
         .send({ productId, quantity: 2 });
 
+      expect(addRes.status).toBe(201);
+      expect(addRes.body).toHaveProperty('item');
+      expect(addRes.body.item).not.toBeNull();
+      expect(addRes.body.item).toHaveProperty('id');
       cartItemId = addRes.body.item.id;
     });
 
@@ -247,6 +241,10 @@ describe('Cart', () => {
         .set('Authorization', `Bearer ${userToken}`)
         .send({ productId, quantity: 2 });
 
+      expect(addRes.status).toBe(201);
+      expect(addRes.body).toHaveProperty('item');
+      expect(addRes.body.item).not.toBeNull();
+      expect(addRes.body.item).toHaveProperty('id');
       cartItemId = addRes.body.item.id;
     });
 
@@ -314,13 +312,8 @@ describe('Cart', () => {
 
     it('should reject clearing non-existent cart', async () => {
       // Create another user without cart
-      await createTestUser('user2@example.com', 'USER');
-      const loginRes = await request(app).post('/api/v1/auth/login').send({
-        email: 'user2@example.com',
-        password: 'password123',
-      });
-      expect(loginRes.status).toBe(200);
-      const user2Token = loginRes.body.accessToken;
+      const user2Result = await createTestUserAndLogin(app, 'user2@example.com', 'USER');
+      const user2Token = user2Result.token;
 
       const res = await request(app)
         .delete('/api/v1/cart')

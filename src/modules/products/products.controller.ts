@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
 
 import { prisma } from '../../config/prisma';
+import { invalidateCache } from '../../middleware/cache';
+import { handlePrismaError } from '../../utils/prisma-errors';
 import { CreateProductInput, UpdateProductInput } from './products.schema';
 
 function slugify(input: string) {
@@ -103,28 +105,71 @@ export async function createProduct(req: Request, res: Response) {
       categoryId,
     },
   });
+
+  // Invalidate product caches
+  invalidateCache('products:.*');
+  invalidateCache('product:.*');
+  invalidateCache('search:.*');
+
   res.status(201).json({ product });
 }
 
 export async function updateProduct(req: Request, res: Response) {
   const { id } = req.params as { id: string };
   const body = req.body as UpdateProductInput;
-  const data: Prisma.ProductUpdateInput = { ...body };
-  if (body.title) data.slug = slugify(body.title);
+
   try {
+    // Check if product exists before updating
+    const existingProduct = await prisma.product.findUnique({ where: { id } });
+    if (!existingProduct) {
+      return res.status(404).json({ message: 'Product not found' });
+    }
+
+    const data: Prisma.ProductUpdateInput = { ...body };
+    if (body.title) data.slug = slugify(body.title);
+
     const product = await prisma.product.update({ where: { id }, data });
+
+    // Invalidate product caches
+    invalidateCache('products:.*');
+    invalidateCache('product:.*');
+    invalidateCache('search:.*');
+
     res.json({ product });
-  } catch {
-    res.status(404).json({ message: 'Product not found' });
+  } catch (error) {
+    // Handle Prisma errors (e.g., unique constraint violations for slug)
+    if (handlePrismaError(error, res)) {
+      return;
+    }
+    // Fallback for unexpected errors
+    res.status(500).json({ message: 'Internal server error' });
   }
 }
 
 export async function deleteProduct(req: Request, res: Response) {
   const { id } = req.params as { id: string };
+
   try {
+    // Check if product exists before deleting
+    const existingProduct = await prisma.product.findUnique({ where: { id } });
+    if (!existingProduct) {
+      return res.status(404).json({ message: 'Product not found' });
+    }
+
     await prisma.product.delete({ where: { id } });
+
+    // Invalidate product caches
+    invalidateCache('products:.*');
+    invalidateCache('product:.*');
+    invalidateCache('search:.*');
+
     res.status(204).send();
-  } catch {
-    res.status(404).json({ message: 'Product not found' });
+  } catch (error) {
+    // Handle Prisma errors (e.g., foreign key constraints)
+    if (handlePrismaError(error, res)) {
+      return;
+    }
+    // Fallback for unexpected errors
+    res.status(500).json({ message: 'Internal server error' });
   }
 }
