@@ -1,3 +1,4 @@
+import type { Request, Response } from 'express';
 import request from 'supertest';
 import { vi } from 'vitest';
 
@@ -221,6 +222,9 @@ describe('Payments', () => {
 
     it('should return 400 for webhook signature verification error', async () => {
       const { stripe } = await import('../src/config/stripe');
+      if (!stripe) {
+        throw new Error('Stripe mock not configured');
+      }
       vi.mocked(stripe.webhooks.constructEvent).mockImplementationOnce(() => {
         throw new Error('Invalid signature');
       });
@@ -245,7 +249,11 @@ describe('Payments', () => {
     });
 
     it('should return 500 when Stripe webhook secret is not configured', async () => {
-      // Mock env to not have STRIPE_WEBHOOK_SECRET
+      // Mock stripe as null and env without STRIPE_WEBHOOK_SECRET
+      vi.doMock('../src/config/stripe', () => ({
+        stripe: null,
+      }));
+
       vi.doMock('../src/config/env', async () => {
         const actual = (await vi.importActual('../src/config/env')) as {
           env: Record<string, unknown>;
@@ -259,23 +267,36 @@ describe('Payments', () => {
         };
       });
 
-      const mockEvent = {
-        type: 'checkout.session.completed',
-        data: {
-          object: {
-            metadata: { orderId },
-            payment_intent: 'pi_test_123',
+      // Clear the module cache and re-import
+      vi.resetModules();
+      const paymentsModule = await import('../src/modules/payments/payments.controller');
+      const { stripeWebhook } = paymentsModule;
+
+      // Create a mock request/response
+      const mockReq = {
+        headers: { 'stripe-signature': 'test-signature' },
+        body: {
+          type: 'checkout.session.completed',
+          data: {
+            object: {
+              metadata: { orderId },
+              payment_intent: 'pi_test_123',
+            },
           },
         },
-      };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any as Request;
 
-      const res = await request(app)
-        .post('/api/v1/payments/stripe/webhook')
-        .set('stripe-signature', 'test-signature')
-        .send(mockEvent);
+      const mockRes = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn().mockReturnThis(),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any as Response;
 
-      expect(res.status).toBe(500);
-      expect(res.body.message).toBe('Stripe webhook not configured');
+      await stripeWebhook(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(500);
+      expect(mockRes.json).toHaveBeenCalledWith({ message: 'Stripe webhook not configured' });
     });
   });
 });

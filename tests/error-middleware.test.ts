@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { ZodError } from 'zod';
+import { vi } from 'vitest';
 
 import { errorHandler, notFoundHandler } from '../src/middleware/error';
 
@@ -35,14 +36,15 @@ describe('Error Middleware', () => {
           received: 'number',
           path: ['email'],
           message: 'Expected string, received number',
-        },
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any,
       ]);
 
       errorHandler(zodError, mockReq as Request, mockRes as Response, mockNext);
 
       expect(mockRes.status).toHaveBeenCalledWith(400);
       expect(mockRes.json).toHaveBeenCalledWith({
-        message: 'Validation error',
+        message: 'Expected string, received number', // Updated to match new error handler behavior
         errors: zodError.flatten(),
       });
     });

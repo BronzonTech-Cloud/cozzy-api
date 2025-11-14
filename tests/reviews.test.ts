@@ -384,7 +384,7 @@ describe('Reviews', () => {
     beforeEach(async () => {
       // Use the user from createTestUserAndLogin to ensure consistency
       // Retry user lookup with exponential backoff to handle visibility issues
-      let user = null;
+      let user: Awaited<ReturnType<typeof prisma.user.findUnique>> | null = null;
       for (let attempt = 0; attempt < 10; attempt++) {
         if (attempt > 0) {
           await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
@@ -479,7 +479,7 @@ describe('Reviews', () => {
     beforeEach(async () => {
       // Use userId from main beforeEach (already created and verified)
       // Add retry logic in case user isn't visible yet
-      let user = null;
+      let user: Awaited<ReturnType<typeof prisma.user.findUnique>> | null = null;
       for (let attempt = 0; attempt < 8; attempt++) {
         if (attempt > 0) {
           await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
@@ -512,19 +512,20 @@ describe('Reviews', () => {
       }
 
       // Create review with retry logic for FK violations
-      let review = null;
+      let review: Awaited<ReturnType<typeof prisma.review.create>> | null = null;
       for (let attempt = 0; attempt < 5; attempt++) {
         if (attempt > 0) {
           await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
         }
         try {
-          review = await prisma.review.create({
+          const createdReview = await prisma.review.create({
             data: {
               productId,
               userId: user.id,
               rating: 5,
             },
           });
+          review = createdReview;
           break;
         } catch (error: unknown) {
           // If FK violation, retry

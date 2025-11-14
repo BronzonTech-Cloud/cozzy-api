@@ -23,14 +23,15 @@ function configureDatabaseUrl(baseUrl: string, isTest: boolean): string {
     if (isTest) {
       // Smaller connection pool for tests to avoid connection exhaustion
       // and ensure faster connection reuse, which improves data visibility
-      url.searchParams.set('connection_limit', '5');
+      // Reduced to 3 for CI to minimize connection pool delays
+      url.searchParams.set('connection_limit', '3');
 
       // Shorter pool timeout to fail fast if connections are exhausted
       // This helps identify actual connection issues vs. visibility delays
-      url.searchParams.set('pool_timeout', '5');
+      url.searchParams.set('pool_timeout', '3');
 
       // Shorter connect timeout for faster failure detection
-      url.searchParams.set('connect_timeout', '3');
+      url.searchParams.set('connect_timeout', '2');
     } else {
       // Production/development: Use more conservative defaults
       // Only override if not already set in the URL

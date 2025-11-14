@@ -6,7 +6,6 @@ import { prisma } from '../src/config/prisma';
 
 // Configurable retry settings via environment variables (useful for CI tuning)
 const VERIFICATION_TIMEOUT_MS = parseInt(process.env.TEST_VERIFICATION_TIMEOUT_MS || '30000', 10); // 30 seconds default
-const LOGIN_MAX_RETRIES = parseInt(process.env.TEST_LOGIN_MAX_RETRIES || '10', 10);
 const CATEGORY_VERIFICATION_MAX_RETRIES = parseInt(
   process.env.TEST_CATEGORY_VERIFICATION_MAX_RETRIES || '15',
   10,
@@ -32,11 +31,12 @@ export async function createTestUserAndLogin(
   // CRITICAL: Wait for user to be visible in database WITH PASSWORD HASH before attempting login
   // The login endpoint queries by email and requires password hash, so we must ensure both are visible
   // This prevents "User exists: false" and "Invalid credentials" errors in CI
+  // Optimized for CI: reduced attempts and timeout for faster feedback
   const visibilityStartTime = Date.now();
-  const visibilityTimeoutMs = VERIFICATION_TIMEOUT_MS; // Use same timeout as other verifications (90000ms in CI)
+  const visibilityTimeoutMs = parseInt(process.env.TEST_VERIFICATION_TIMEOUT_MS || '2000', 10); // 2 seconds default
   let userVisibleByEmail = false;
   let userHasPasswordHash = false;
-  const maxVisibilityAttempts = 30; // Increased attempts for CI reliability
+  const maxVisibilityAttempts = parseInt(process.env.TEST_VERIFICATION_MAX_RETRIES || '5', 10);
 
   // Get password hash from user object (should be set by createTestUser)
   const expectedPasswordHash = user.passwordHash;
@@ -217,12 +217,12 @@ export async function createTestUserAndLogin(
     }
   }
 
-  // Retry login with exponential backoff (handles timing issues in CI)
+  // Retry login with short delays (handles timing issues in CI)
   // Add timeout to prevent infinite loops
   const loginStartTime = Date.now();
-  const loginTimeoutMs = VERIFICATION_TIMEOUT_MS; // Use same timeout as verification
+  const loginTimeoutMs = parseInt(process.env.TEST_VERIFICATION_TIMEOUT_MS || '3000', 10); // 3 seconds default
   let loginRes: Response | null = null;
-  const loginMaxRetries = LOGIN_MAX_RETRIES;
+  const loginMaxRetries = parseInt(process.env.TEST_LOGIN_MAX_RETRIES || '3', 10);
 
   for (let attempt = 0; attempt < loginMaxRetries; attempt++) {
     // Check timeout
@@ -230,8 +230,8 @@ export async function createTestUserAndLogin(
       throw new Error(`Login timeout after ${loginTimeoutMs}ms for ${email}`);
     }
     if (attempt > 0) {
-      // Exponential backoff: 200ms, 400ms, 600ms, 800ms, 1000ms, etc. (increased for CI)
-      await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
+      // Short delay between attempts
+      await new Promise((resolve) => setTimeout(resolve, 200));
     }
 
     loginRes = await request(app).post('/api/v1/auth/login').send({
@@ -278,9 +278,10 @@ export async function createTestUserAndLogin(
   // Final verification: ensure user is visible in database before returning
   // This prevents 404 errors in controllers that do user lookups
   // CRITICAL: This function MUST guarantee visibility - throw error if not visible
+  // Optimized: reduced attempts for faster feedback
   const finalVerificationStartTime = Date.now();
-  const finalVerificationTimeoutMs = 10000; // 10 seconds for final verification
-  const finalVerificationMaxAttempts = 20; // More attempts for reliability
+  const finalVerificationTimeoutMs = 1000; // 1 second max for final verification
+  const finalVerificationMaxAttempts = 2; // Reduced to prevent timeouts
   let finalUserCheck = false;
 
   for (let attempt = 0; attempt < finalVerificationMaxAttempts; attempt++) {
@@ -290,79 +291,32 @@ export async function createTestUserAndLogin(
     }
 
     if (attempt > 0) {
-      // Exponential backoff: 200ms, 400ms, 600ms, etc. (increased for CI)
-      await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
+      // Short delay between attempts
+      await new Promise((resolve) => setTimeout(resolve, 100));
     }
 
     // Force connection refresh before each check
     await prisma.$executeRaw`SELECT 1`;
 
     try {
-      // CRITICAL: Use regular queries (not transactions) for verification
-      // This matches how the actual application queries work
-
-      // Strategy 1: Try Prisma findUnique by ID and email
-      const finalCheckById = await prisma.user.findUnique({
-        where: { id: user.id },
-      });
+      // Simple check: user must be visible by email (same as login endpoint)
       const finalCheckByEmail = await prisma.user.findUnique({
         where: { email },
       });
 
-      // User must be visible by both ID and email, with password hash
-      if (
-        finalCheckById &&
-        finalCheckById.id === user.id &&
-        finalCheckById.passwordHash &&
-        finalCheckByEmail &&
-        finalCheckByEmail.id === user.id &&
-        finalCheckByEmail.passwordHash
-      ) {
+      if (finalCheckByEmail && finalCheckByEmail.id === user.id && finalCheckByEmail.passwordHash) {
         finalUserCheck = true;
         break;
       }
-
-      // Strategy 2: Try raw SQL if Prisma didn't work
-      if (!finalUserCheck) {
-        const finalCheckByIdRaw = await prisma.$queryRaw<
-          Array<{ id: string; passwordHash: string | null }>
-        >`
-          SELECT id, "passwordHash" FROM "User" WHERE id = ${user.id} LIMIT 1
-        `;
-
-        const finalCheckByEmailRaw = await prisma.$queryRaw<
-          Array<{ id: string; email: string; passwordHash: string | null }>
-        >`
-          SELECT id, email, "passwordHash" FROM "User" WHERE email = ${email} LIMIT 1
-        `;
-
-        if (
-          finalCheckByIdRaw &&
-          finalCheckByIdRaw.length > 0 &&
-          finalCheckByIdRaw[0].id === user.id &&
-          finalCheckByIdRaw[0].passwordHash &&
-          finalCheckByEmailRaw &&
-          finalCheckByEmailRaw.length > 0 &&
-          finalCheckByEmailRaw[0].id === user.id &&
-          finalCheckByEmailRaw[0].passwordHash
-        ) {
-          finalUserCheck = true;
-          break;
-        }
-      }
-    } catch (error) {
+    } catch {
       // Continue to next attempt
-      if (attempt === finalVerificationMaxAttempts - 1) {
-        // Last attempt failed - log for debugging
-        console.warn(`Final verification attempt ${attempt + 1} failed:`, error);
-      }
     }
   }
 
   // CRITICAL: Throw error if user is not visible - this function must guarantee visibility
   if (!finalUserCheck) {
-    // One final attempt with delay - increased for CI
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    // One final attempt with short delay
+    await new Promise((resolve) => setTimeout(resolve, 200));
     await prisma.$executeRaw`SELECT 1`;
 
     let visibleByIdRaw = false;
@@ -523,8 +477,8 @@ export async function createTestUser(email: string, role: 'USER' | 'ADMIN' = 'US
 
     for (let attempt = 0; attempt < quickVerificationAttempts; attempt++) {
       if (attempt > 0) {
-        // Exponential backoff - increased delays for CI reliability
-        await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
+        // Short delay between attempts
+        await new Promise((resolve) => setTimeout(resolve, 100));
       }
 
       // Force connection refresh before each verification attempt
@@ -808,9 +762,13 @@ export async function createTestCategory(name: string, slug?: string) {
     // CRITICAL: Verify category is visible - this function must guarantee visibility
     // This prevents FK violations when creating products that reference this category
     // Use transaction with ReadCommitted isolation to ensure we see committed data
+    // Optimized: reduced attempts and timeout for faster feedback
     const verificationStartTime = Date.now();
-    const verificationTimeoutMs = 15000; // 15 seconds for verification (increased for CI)
-    const verificationMaxAttempts = 25; // Increased for CI reliability
+    const verificationTimeoutMs = parseInt(process.env.TEST_VERIFICATION_TIMEOUT_MS || '2000', 10); // 2 seconds default
+    const verificationMaxAttempts = parseInt(
+      process.env.TEST_CATEGORY_VERIFICATION_MAX_RETRIES || '5',
+      10,
+    );
     let verifyCategory: { id: string; name: string; slug: string } | null = null;
 
     for (let attempt = 0; attempt < verificationMaxAttempts; attempt++) {
@@ -820,8 +778,8 @@ export async function createTestCategory(name: string, slug?: string) {
       }
 
       if (attempt > 0) {
-        // Exponential backoff - increased delays for CI reliability
-        await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
+        // Short delay between attempts
+        await new Promise((resolve) => setTimeout(resolve, 100));
       }
 
       // Force connection refresh before each check
@@ -1065,8 +1023,8 @@ export async function createTestProduct(
   // This prevents FK violations when creating orders/reviews that reference this product
   // Use multiple verification strategies: raw SQL, Prisma findUnique, and findFirst
   const productVerificationStartTime = Date.now();
-  const productVerificationTimeoutMs = 15000; // 15 seconds for verification (increased for CI)
-  const productVerificationMaxAttempts = 25; // Increased for CI reliability
+  const productVerificationTimeoutMs = 3000; // 3 seconds max for verification
+  const productVerificationMaxAttempts = 5; // Reduced to prevent timeouts
   let verifyProduct: { id: string; title: string; slug: string } | null = null;
 
   for (let attempt = 0; attempt < productVerificationMaxAttempts; attempt++) {
@@ -1291,8 +1249,8 @@ async function safeDelete(tableName: string, deleteFn: () => Promise<unknown>): 
 }
 
 export async function cleanupDatabase() {
-  // Add overall timeout for cleanup (max 45 seconds)
-  const cleanupTimeout = 45000;
+  // Add overall timeout for cleanup (reduced for faster feedback)
+  const cleanupTimeout = 30000; // 30 seconds (reduced from 45s)
   const cleanupStartTime = Date.now();
 
   // Wait for any ongoing cleanup to complete (prevents deadlocks from concurrent TRUNCATE)

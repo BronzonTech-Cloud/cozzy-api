@@ -7,11 +7,23 @@ export const createCouponSchema = z
     description: z.string().max(500).optional(),
     discountType: z.nativeEnum(DiscountType),
     discountValue: z.number().int().positive().max(10000, 'Discount value cannot exceed 10000'),
-    minPurchase: z.number().int().positive().optional(),
-    maxDiscount: z.number().int().positive().optional(),
-    usageLimit: z.number().int().positive().optional(),
-    validFrom: z.string().datetime(),
-    validUntil: z.string().datetime(),
+    minPurchase: z
+      .number()
+      .int()
+      .nonnegative('minPurchase must be a non-negative integer')
+      .optional(),
+    maxDiscount: z
+      .number()
+      .int()
+      .nonnegative('maxDiscount must be a non-negative integer')
+      .optional(),
+    usageLimit: z
+      .number()
+      .int()
+      .nonnegative('usageLimit must be a non-negative integer')
+      .optional(),
+    validFrom: z.string().datetime('Invalid date format for validFrom'),
+    validUntil: z.string().datetime('Invalid date format for validUntil'),
     active: z.boolean().default(true),
   })
   .refine(

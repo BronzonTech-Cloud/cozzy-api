@@ -100,13 +100,12 @@ jobs:
           STRIPE_WEBHOOK_SECRET: whsec_fake_webhook_secret_for_testing
           APP_URL: http://localhost:4000
           CLIENT_URL: http://localhost:3000
-          # Tune test retry settings for CI reliability
-          # Increased retries and timeout for slower CI environments with connection pooling delays
-          # These values are higher than defaults to handle CI database visibility issues
-          TEST_VERIFICATION_MAX_RETRIES: 30
-          TEST_VERIFICATION_TIMEOUT_MS: 90000
-          TEST_LOGIN_MAX_RETRIES: 20
-          TEST_CATEGORY_VERIFICATION_MAX_RETRIES: 30
+          # Optimized test retry settings for CI reliability
+          # Balanced retries and timeout to handle CI database visibility issues without excessive delays
+          TEST_VERIFICATION_MAX_RETRIES: 10
+          TEST_VERIFICATION_TIMEOUT_MS: 5000
+          TEST_LOGIN_MAX_RETRIES: 5
+          TEST_CATEGORY_VERIFICATION_MAX_RETRIES: 10
         run: bun run test
-        timeout-minutes: 15
+        timeout-minutes: 10
         continue-on-error: false

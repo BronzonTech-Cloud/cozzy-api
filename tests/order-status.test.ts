@@ -1,4 +1,4 @@
-import request from 'supertest';
+import request, { type Response } from 'supertest';
 
 import { createApp } from '../src/app';
 import { prisma } from '../src/config/prisma';
@@ -35,7 +35,7 @@ describe('Order Status Tracking', () => {
     productId = product.id;
 
     // Create an order - add retry logic for FK violations
-    let orderRes = null;
+    let orderRes: Response | null = null;
     for (let attempt = 0; attempt < 5; attempt++) {
       if (attempt > 0) {
         // Wait longer between retries to ensure user is visible
@@ -49,12 +49,12 @@ describe('Order Status Tracking', () => {
           items: [{ productId, quantity: 2 }],
         });
 
-      if (orderRes.status === 201 && orderRes.body?.order?.id) {
+      if (orderRes && orderRes.status === 201 && orderRes.body?.order?.id) {
         break;
       }
 
       // If it's a 500 error with FK violation, retry
-      if (orderRes.status === 500 && attempt < 4) {
+      if (orderRes && orderRes.status === 500 && attempt < 4) {
         continue;
       }
     }
@@ -63,6 +63,9 @@ describe('Order Status Tracking', () => {
     expect(orderRes?.body).toHaveProperty('order');
     expect(orderRes?.body.order).not.toBeNull();
     expect(orderRes?.body.order).toHaveProperty('id');
+    if (!orderRes) {
+      throw new Error('Order creation failed');
+    }
     orderId = orderRes.body.order.id;
   });
 
@@ -231,7 +234,7 @@ describe('Order Status Tracking', () => {
   describe('GET /api/v1/orders/history', () => {
     it('should get order history with filters', async () => {
       // Create another order with retry logic for FK violations
-      let orderRes2 = null;
+      let orderRes2: Response | null = null;
       for (let attempt = 0; attempt < 5; attempt++) {
         if (attempt > 0) {
           await new Promise((resolve) => setTimeout(resolve, 300 * attempt));
@@ -244,18 +247,21 @@ describe('Order Status Tracking', () => {
             items: [{ productId, quantity: 1 }],
           });
 
-        if (orderRes2.status === 201 && orderRes2.body?.order?.id) {
+        if (orderRes2 && orderRes2.status === 201 && orderRes2.body?.order?.id) {
           break;
         }
 
         // If it's a 500 error with FK violation, retry
-        if (orderRes2.status === 500 && attempt < 4) {
+        if (orderRes2 && orderRes2.status === 500 && attempt < 4) {
           continue;
         }
       }
 
-      expect(orderRes2?.status).toBe(201);
-      expect(orderRes2?.body).toHaveProperty('order');
+      if (!orderRes2) {
+        throw new Error('Order creation failed');
+      }
+      expect(orderRes2.status).toBe(201);
+      expect(orderRes2.body).toHaveProperty('order');
       const orderId2 = orderRes2.body.order.id;
 
       // Update second order status

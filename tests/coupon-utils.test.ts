@@ -1,4 +1,5 @@
 import { Coupon, DiscountType } from '@prisma/client';
+import { vi } from 'vitest';
 
 import { validateAndCalculateCoupon } from '../src/modules/coupons/coupon-utils';
 import { prisma } from '../src/config/prisma';

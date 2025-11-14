@@ -132,7 +132,7 @@ describe('Password Reset', () => {
       });
 
       // Wait for token to be visible (handle potential visibility delays in CI)
-      let user = null;
+      let user: Awaited<ReturnType<typeof prisma.user.findUnique>> | null = null;
       for (let attempt = 0; attempt < 10; attempt++) {
         if (attempt > 0) {
           await new Promise((resolve) => setTimeout(resolve, 100 * attempt));

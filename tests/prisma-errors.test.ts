@@ -1,4 +1,5 @@
 import { Response } from 'express';
+import { vi } from 'vitest';
 import {
   PrismaClientKnownRequestError,
   PrismaClientValidationError,

@@ -93,7 +93,7 @@ describe('Email Verification', () => {
 
     it('should return 400 for expired token', async () => {
       // Ensure user is visible before updating
-      let user = null;
+      let user: Awaited<ReturnType<typeof prisma.user.findUnique>> | null = null;
       for (let attempt = 0; attempt < 8; attempt++) {
         if (attempt > 0) {
           await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
@@ -200,7 +200,7 @@ describe('Email Verification', () => {
 
     it('should return 400 if email is already verified', async () => {
       // First, ensure user is visible before trying to update
-      let user = null;
+      let user: Awaited<ReturnType<typeof prisma.user.findUnique>> | null = null;
       for (let attempt = 0; attempt < 8; attempt++) {
         if (attempt > 0) {
           await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
